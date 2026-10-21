@@ -4,7 +4,7 @@ import { isMac } from "./platform";
 import { transfer } from "./ops";
 import type { Loc } from "./types";
 
-export const MIME = "application/x-atlas-items";
+export const MIME = "application/x-5files-items";
 
 let dragging: Loc[] | null = null;
 

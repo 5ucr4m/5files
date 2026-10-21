@@ -9,10 +9,10 @@
 //! Endpoints can be overridden with env vars (see `env_or` calls); the defaults match
 //! `tests/docker/up.sh`. Ignored by default so plain `cargo test` needs no Docker.
 
-use atlas_lib::connections::{self, Connection, Kind, Opts};
-use atlas_lib::error::AppError;
-use atlas_lib::metrics;
-use atlas_lib::vfs::DynProvider;
+use fivefiles_lib::connections::{self, Connection, Kind, Opts};
+use fivefiles_lib::error::AppError;
+use fivefiles_lib::metrics;
+use fivefiles_lib::vfs::DynProvider;
 use rand::RngCore;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -24,9 +24,9 @@ fn env_or(key: &str, default: &str) -> String {
 }
 
 fn test_dir() -> PathBuf {
-    match std::env::var("ATLAS_TEST_DIR") {
+    match std::env::var("FIVEFILES_TEST_DIR") {
         Ok(d) if !d.is_empty() => PathBuf::from(d),
-        _ => std::env::temp_dir().join("atlas-remote-tests"),
+        _ => std::env::temp_dir().join("fivefiles-remote-tests"),
     }
 }
 
@@ -101,7 +101,7 @@ async fn exercise(p: DynProvider, base: &str) {
     let root = p.root();
     p.list(&root).await.unwrap_or_else(|e| panic!("list root {root}: {e}"));
 
-    let top = p.join(base, &unique("atlas-it"));
+    let top = p.join(base, &unique("fivefiles-it"));
     let nested = p.join(&p.join(&top, "a"), "b c"); // space in a name, on purpose
     p.mkdir(&nested).await.unwrap_or_else(|e| panic!("mkdir {nested}: {e}"));
     assert!(p.stat(&nested).await.unwrap().is_dir);
@@ -173,19 +173,19 @@ async fn exercise(p: DynProvider, base: &str) {
 
 fn sftp_opts() -> Opts {
     opts(&[
-        ("host", env_or("ATLAS_SFTP_HOST", "127.0.0.1")),
-        ("port", env_or("ATLAS_SFTP_PORT", "22222")),
-        ("username", env_or("ATLAS_SFTP_USER", "atlas")),
+        ("host", env_or("FIVEFILES_SFTP_HOST", "127.0.0.1")),
+        ("port", env_or("FIVEFILES_SFTP_PORT", "22222")),
+        ("username", env_or("FIVEFILES_SFTP_USER", "fivefiles")),
     ])
 }
 
 fn sftp_password() -> Opts {
-    opts(&[("password", env_or("ATLAS_SFTP_PASS", "atlaspass"))])
+    opts(&[("password", env_or("FIVEFILES_SFTP_PASS", "fivefilespass"))])
 }
 
 /// atmoz/sftp chroots the user into a root-owned home; `upload/` is the writable folder.
 fn sftp_base() -> String {
-    env_or("ATLAS_SFTP_BASE", "/upload")
+    env_or("FIVEFILES_SFTP_BASE", "/upload")
 }
 
 #[tokio::test]
@@ -205,7 +205,7 @@ async fn sftp_password_roundtrip() {
 #[ignore = "needs docker: tests/docker/up.sh"]
 async fn sftp_key_auth() {
     let _wd = watchdog("sftp_key_auth", 120);
-    let key = env_or("ATLAS_SFTP_KEY", &test_dir().join("id_ed25519").to_string_lossy());
+    let key = env_or("FIVEFILES_SFTP_KEY", &test_dir().join("id_ed25519").to_string_lossy());
     // From a key file…
     let mut o = sftp_opts();
     o.insert("authMethod".into(), "key".into());
@@ -276,7 +276,7 @@ async fn sftp_host_key_tofu() {
 async fn sftp_concurrent_transfers_share_one_session() {
     let _wd = watchdog("sftp_concurrent_transfers_share_one_session", 120);
     let p = connections::build(&conn(Kind::Sftp, sftp_opts()), &sftp_password()).await.unwrap().provider;
-    let top = p.join(&sftp_base(), &unique("atlas-conc"));
+    let top = p.join(&sftp_base(), &unique("fivefiles-conc"));
     p.mkdir(&top).await.unwrap();
     let mut tasks = Vec::new();
     for i in 0..3 {
@@ -301,13 +301,13 @@ async fn sftp_concurrent_transfers_share_one_session() {
 async fn sftp_symlinks_are_followed_for_type() {
     let _wd = watchdog("sftp_symlinks_are_followed_for_type", 120);
     let p = connections::build(&conn(Kind::Sftp, sftp_opts()), &sftp_password()).await.unwrap().provider;
-    let top = p.join(&sftp_base(), &unique("atlas-link"));
+    let top = p.join(&sftp_base(), &unique("fivefiles-link"));
     let target = p.join(&top, "dir");
     p.mkdir(&target).await.unwrap();
     write_file(&p, &p.join(&target, "x.txt"), b"x").await;
     // No symlink API on the trait: create one with the container's shell.
-    let link_in_container = format!("/home/atlas{}", p.join(&top, "link"));
-    let st = std::process::Command::new("docker").args(["exec", "atlas-test-sftp", "ln", "-s", "dir", &link_in_container]).status();
+    let link_in_container = format!("/home/fivefiles{}", p.join(&top, "link"));
+    let st = std::process::Command::new("docker").args(["exec", "fivefiles-test-sftp", "ln", "-s", "dir", &link_in_container]).status();
     if !matches!(st, Ok(s) if s.success()) {
         eprintln!("skipping: cannot create a symlink inside the container");
         p.remove(&top).await.unwrap();
@@ -332,14 +332,14 @@ async fn ftp_roundtrip() {
     let c = conn(
         Kind::Ftp,
         opts(&[
-            ("host", env_or("ATLAS_FTP_HOST", "127.0.0.1")),
-            ("port", env_or("ATLAS_FTP_PORT", "22121")),
-            ("username", env_or("ATLAS_FTP_USER", "atlas")),
+            ("host", env_or("FIVEFILES_FTP_HOST", "127.0.0.1")),
+            ("port", env_or("FIVEFILES_FTP_PORT", "22121")),
+            ("username", env_or("FIVEFILES_FTP_USER", "fivefiles")),
             // delfer/alpine-ftp-server doesn't chroot users; scope the connection to home.
-            ("root", env_or("ATLAS_FTP_ROOT", "/ftp/atlas")),
+            ("root", env_or("FIVEFILES_FTP_ROOT", "/ftp/fivefiles")),
         ]),
     );
-    let secrets = opts(&[("password", env_or("ATLAS_FTP_PASS", "atlaspass"))]);
+    let secrets = opts(&[("password", env_or("FIVEFILES_FTP_PASS", "fivefilespass"))]);
     let p = connections::build(&c, &secrets).await.unwrap().provider;
     exercise(p, "/").await;
 }
@@ -351,14 +351,14 @@ async fn s3_roundtrip() {
     let c = conn(
         Kind::S3,
         opts(&[
-            ("bucket", env_or("ATLAS_S3_BUCKET", "atlas-test")),
-            ("endpoint", env_or("ATLAS_S3_ENDPOINT", "http://127.0.0.1:29000")),
-            ("region", env_or("ATLAS_S3_REGION", "us-east-1")),
-            ("accessKeyId", env_or("ATLAS_S3_ACCESS_KEY", "atlas")),
+            ("bucket", env_or("FIVEFILES_S3_BUCKET", "fivefiles-test")),
+            ("endpoint", env_or("FIVEFILES_S3_ENDPOINT", "http://127.0.0.1:29000")),
+            ("region", env_or("FIVEFILES_S3_REGION", "us-east-1")),
+            ("accessKeyId", env_or("FIVEFILES_S3_ACCESS_KEY", "fivefiles")),
             ("pathStyle", "true".into()),
         ]),
     );
-    let secrets = opts(&[("secretAccessKey", env_or("ATLAS_S3_SECRET_KEY", "atlassecret"))]);
+    let secrets = opts(&[("secretAccessKey", env_or("FIVEFILES_S3_SECRET_KEY", "fivefilessecret"))]);
     let p = connections::build(&c, &secrets).await.unwrap().provider;
     exercise(p, "/").await;
 }
@@ -369,9 +369,9 @@ async fn webdav_roundtrip() {
     let _wd = watchdog("webdav_roundtrip", 120);
     let c = conn(
         Kind::Webdav,
-        opts(&[("url", env_or("ATLAS_WEBDAV_URL", "http://127.0.0.1:28080")), ("username", env_or("ATLAS_WEBDAV_USER", "atlas"))]),
+        opts(&[("url", env_or("FIVEFILES_WEBDAV_URL", "http://127.0.0.1:28080")), ("username", env_or("FIVEFILES_WEBDAV_USER", "fivefiles"))]),
     );
-    let secrets = opts(&[("password", env_or("ATLAS_WEBDAV_PASS", "atlaspass"))]);
+    let secrets = opts(&[("password", env_or("FIVEFILES_WEBDAV_PASS", "fivefilespass"))]);
     let p = connections::build(&c, &secrets).await.unwrap().provider;
     exercise(p, "/").await;
 }

@@ -1,10 +1,10 @@
-# Atlas
+# 5files
 
 A modern, fast file explorer for **macOS, Windows and Linux**, built with Tauri 2 (Rust) and React.
 
 Cloud storage and servers mount as drives next to your disks, every copy goes through a visible
 queue with real progress, and a live monitor in the title bar shows how much disk and network
-Atlas itself is using.
+5files itself is using.
 
 ## Features
 
@@ -48,9 +48,9 @@ Credentials live in the OS keychain (macOS Keychain, Windows Credential Manager,
 Linux), never in the config file and never sent back to the UI. If no keychain is available they fall
 back to a `0600` file and the drive is flagged.
 
-**Activity monitor** — the "seismograph" in the title bar plots Atlas's own disk reads/writes and
+**Activity monitor** — the "seismograph" in the title bar plots 5files's own disk reads/writes and
 network download/upload in real time (mirrored traces, last 60 s). It counts the bytes flowing through
-Atlas's own I/O paths, so it reflects only this app, identically on all three platforms. Click it for
+5files's own I/O paths, so it reflects only this app, identically on all three platforms. Click it for
 totals and peaks.
 
 **Look & feel** — light, dark or system theme, six accent colors, comfortable/compact density, icon
@@ -118,12 +118,12 @@ cargo test --test remote_providers -- --ignored --test-threads=1
 sh tests/docker/down.sh
 
 # In-app smoke run inside the real webview (native events, watcher, queue, thumbnails):
-ATLAS_E2E=/path/to/empty/dir ./target/debug/atlas   # prints "[webview:e2e] PASS"
+FIVEFILES_E2E=/path/to/empty/dir ./target/debug/5files   # prints "[webview:e2e] PASS"
 ```
 (The smoke run expects `seed.bin` and `pic.png` in that directory.)
 
 CI (`.github/workflows/ci.yml`) runs the test suites on macOS, Windows and Ubuntu, the Docker
 integration suite on Ubuntu, and builds installers for all three platforms on `main`.
 
-Environment overrides: `ATLAS_CONFIG_DIR` (config location, e.g. portable installs),
-`ATLAS_NO_KEYCHAIN=1` (store secrets in the fallback file).
+Environment overrides: `FIVEFILES_CONFIG_DIR` (config location, e.g. portable installs),
+`FIVEFILES_NO_KEYCHAIN=1` (store secrets in the fallback file).

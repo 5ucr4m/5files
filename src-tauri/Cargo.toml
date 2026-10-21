@@ -1,14 +1,14 @@
 [package]
-name = "atlas"
+name = "fivefiles"
 version = "0.1.0"
-description = "Atlas — a modern, fast, cross-platform file explorer"
-authors = ["Atlas contributors"]
+description = "5files — a modern, fast, cross-platform file explorer"
+authors = ["5files contributors"]
 edition = "2024"
 license = "MIT"
 
 [lib]
 # The `_lib` suffix keeps the lib name unique from the bin name (Windows quirk, cargo#8519).
-name = "atlas_lib"
+name = "fivefiles_lib"
 # Desktop-only app: rlib is all the binary needs (staticlib/cdylib are for mobile targets).
 crate-type = ["rlib"]
 

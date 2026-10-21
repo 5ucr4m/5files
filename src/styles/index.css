@@ -3,7 +3,7 @@
 @import "@fontsource-variable/geist-mono";
 
 /* ---------------------------------------------------------------------------
-   Atlas tokens. Cool graphite neutrals + one tunable accent (--accent).
+   5files tokens. Cool graphite neutrals + one tunable accent (--accent).
    Light is the default; [data-theme="dark"] on <html> swaps the surfaces.
 --------------------------------------------------------------------------- */
 :root {
@@ -164,7 +164,7 @@ button {
 }
 
 /* Indeterminate shimmer for loading bars. */
-@keyframes atlas-indeterminate {
+@keyframes fivefiles-indeterminate {
   0% {
     transform: translateX(-100%);
   }
@@ -178,10 +178,10 @@ button {
   inset: 0;
   width: 40%;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: atlas-indeterminate 1.1s ease-in-out infinite;
+  animation: fivefiles-indeterminate 1.1s ease-in-out infinite;
 }
 
-@keyframes atlas-stripes {
+@keyframes fivefiles-stripes {
   to {
     background-position: 16px 0;
   }
@@ -189,7 +189,7 @@ button {
 .stripes {
   background-image: repeating-linear-gradient(-45deg, transparent 0 4px, rgb(255 255 255 / 0.22) 4px 8px);
   background-size: 16px 16px;
-  animation: atlas-stripes 0.8s linear infinite;
+  animation: fivefiles-stripes 0.8s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

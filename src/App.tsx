@@ -115,8 +115,8 @@ function useShortcuts() {
       }
       if (mod && !e.shiftKey && e.key === "1") return stop(), t && tabs.patch(t.id, { view: "list" });
       if (mod && !e.shiftKey && e.key === "2") return stop(), t && tabs.patch(t.id, { view: "grid" });
-      if (mod && k === "l") return stop(), window.dispatchEvent(new Event("atlas:edit-path"));
-      if (mod && k === "f") return stop(), window.dispatchEvent(new Event("atlas:focus-search"));
+      if (mod && k === "l") return stop(), window.dispatchEvent(new Event("5files:edit-path"));
+      if (mod && k === "f") return stop(), window.dispatchEvent(new Event("5files:focus-search"));
       if (mod && e.key === ",") return stop(), ui.set({ panel: ui.panel === "settings" ? null : "settings" });
       if (mod && e.shiftKey && (e.key === "." || e.key === ">")) return stop(), s.set({ showHidden: !s.showHidden });
       if ((mod && e.altKey && k === "p") || (mod && k === "i")) return stop(), s.set({ previewPane: !s.previewPane });

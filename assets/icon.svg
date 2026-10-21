@@ -1,16 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5865ff"/>
-      <stop offset="1" stop-color="#2a33c9"/>
+      <stop offset="0" stop-color="#6b5cff"/>
+      <stop offset="0.55" stop-color="#3b4cf5"/>
+      <stop offset="1" stop-color="#1f2bb8"/>
     </linearGradient>
-    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e3e7ff"/>
+      <stop offset="1" stop-color="#e6e9ff"/>
     </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0b1170" flood-opacity="0.35"/>
+    </filter>
   </defs>
-  <rect x="80" y="80" width="864" height="864" rx="200" fill="url(#bg)"/>
-  <path d="M232 330a52 52 0 0 1 52-52h150c16 0 31 7 41 19l44 51h221a52 52 0 0 1 52 52v28H232Z" fill="#ffffff" opacity="0.45"/>
-  <rect x="232" y="370" width="560" height="380" rx="52" fill="url(#front)"/>
-  <path d="M292 566h86l40-86 58 176 52-132 36 42h168" fill="none" stroke="#3b4cf5" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="80" y="80" width="864" height="864" rx="208" fill="url(#bg)"/>
+  <!-- the stack: four cards fanned behind the front one (= five files) -->
+  <g transform="translate(512 560)">
+    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.16" transform="rotate(-24)"/>
+    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.24" transform="rotate(-14)"/>
+    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.32" transform="rotate(14)"/>
+    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.22" transform="rotate(24)"/>
+    <!-- front card with folded corner -->
+    <g filter="url(#sh)">
+      <path d="M-200 -236a44 44 0 0 1 44-44H104l96 96V196a44 44 0 0 1-44 44H-156a44 44 0 0 1-44-44Z" fill="url(#card)"/>
+    </g>
+    <path d="M104 -280v52a44 44 0 0 0 44 44h52Z" fill="#c9cffb"/>
+    <!-- the 5 -->
+    <path d="M78 -148H-62L-78 -8C-46 -30-6 -38 28 -32C96 -20 128 34 120 88C110 156 52 190-8 188C-52 186-86 168-108 142"
+          fill="none" stroke="#3b4cf5" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>

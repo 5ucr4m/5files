@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const KEYRING_SERVICE: &str = "dev.atlas.files";
+const KEYRING_SERVICE: &str = "dev.fivefiles.app";
 /// Upper bound for connecting + listing the start folder.
 pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -603,7 +603,7 @@ mod tests {
     async fn keychain_roundtrip_with_large_secret_inside_runtime() {
         let dir = tempfile::tempdir().unwrap();
         let store = SecretStore::new(dir.path(), true);
-        let id = format!("atlas-test-{}", uuid::Uuid::new_v4());
+        let id = format!("5files-test-{}", uuid::Uuid::new_v4());
         let mut secrets = Opts::new();
         secrets.insert("privateKey".into(), "k".repeat(3300));
         secrets.insert("passphrase".into(), "pässwörd".into());

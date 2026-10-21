@@ -23,11 +23,11 @@ fn harness() -> Harness {
     let config = tempfile::tempdir().unwrap();
     // SAFETY: guarded by LOCK; nothing else in this binary reads these concurrently.
     unsafe {
-        std::env::set_var("ATLAS_CONFIG_DIR", config.path());
-        std::env::set_var("ATLAS_NO_KEYCHAIN", "1");
+        std::env::set_var("FIVEFILES_CONFIG_DIR", config.path());
+        std::env::set_var("FIVEFILES_NO_KEYCHAIN", "1");
     }
-    let mut app = atlas_lib::build(mock_builder()).build(tauri::generate_context!(test = true)).unwrap();
-    atlas_lib::init(&mut app).unwrap();
+    let mut app = fivefiles_lib::build(mock_builder()).build(tauri::generate_context!(test = true)).unwrap();
+    fivefiles_lib::init(&mut app).unwrap();
     let win = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
     Harness { _app: app, win, _config: config }
 }
@@ -85,7 +85,7 @@ fn browse_create_rename_and_errors() {
     let h = harness();
     let dir = tempfile::tempdir().unwrap();
     let root = s(dir.path());
-    std::fs::write(dir.path().join("b.txt"), "hello atlas").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "hello fivefiles").unwrap();
 
     // Empty path on "local" opens Home.
     let home = h.ok("list_dir", json!({ "fs": "local", "path": null }));

@@ -24,7 +24,7 @@ function file(name: string, size: number, age = rnd() * 60, content?: string): N
   return { name, dir: false, size, modified: now - age * DAY, content };
 }
 
-const README = `# Atlas\n\nA modern, fast file explorer.\n\n- Tabs\n- Transfer queue\n- Remote drives\n`;
+const README = `# 5files\n\nA modern, fast file explorer.\n\n- Tabs\n- Transfer queue\n- Remote drives\n`;
 const CODE = `import { useState } from "react";\n\nexport function Counter() {\n  const [n, setN] = useState(0);\n  return <button onClick={() => setN(n + 1)}>{n}</button>;\n}\n`;
 
 function homeTree(): Node {
@@ -32,7 +32,7 @@ function homeTree(): Node {
   return dir("/", [
     dir("Users", [
       dir("demo", [
-        dir("Desktop", [file("Screenshot 2026-10-12.png", 1_820_331, 9), file("todo.md", 812, 1, "- ship atlas\n- sleep")]),
+        dir("Desktop", [file("Screenshot 2026-10-12.png", 1_820_331, 9), file("todo.md", 812, 1, "- ship 5files\n- sleep")]),
         dir("Documents", [
           dir("Invoices", [file("2026-08.pdf", 120_220, 50), file("2026-09.pdf", 118_002, 20)]),
           file("Proposal — Q4.docx", 482_110, 4),
@@ -42,7 +42,7 @@ function homeTree(): Node {
         ]),
         dir("Downloads", [
           file("ubuntu-26.04-desktop-amd64.iso", 6_100_000_000, 6),
-          file("atlas-0.1.0.dmg", 9_800_000, 1),
+          file("5files-0.1.0.dmg", 9_800_000, 1),
           file("dataset.zip", 712_000_000, 14),
           file("podcast-ep-42.mp3", 61_000_000, 3),
           file("talk.mp4", 1_400_000_000, 8),
@@ -50,10 +50,10 @@ function homeTree(): Node {
         dir("Pictures", [dir("Trips", photos.slice(0, 10), 30), ...photos.slice(10), file("logo.svg", 3_402, 40)]),
         dir("Music", [file("Night Drive.flac", 41_200_000, 90), file("Morning.m4a", 8_100_000, 80)]),
         dir("Projects", [
-          dir("atlas", [
+          dir("5files", [
             dir("src", [file("App.tsx", CODE.length, 0.1, CODE), file("main.tsx", 420, 0.3, CODE)]),
-            dir("src-tauri", [file("Cargo.toml", 1_532, 0.5, "[package]\nname = \"atlas\"\n")]),
-            file("package.json", 812, 0.4, '{\n  "name": "atlas"\n}\n'),
+            dir("src-tauri", [file("Cargo.toml", 1_532, 0.5, "[package]\nname = \"5files\"\n")]),
+            file("package.json", 812, 0.4, '{\n  "name": "5files"\n}\n'),
             file("README.md", README.length, 0.5, README),
             file(".gitignore", 120, 10, "node_modules\ndist\n"),
           ], 0.1),
@@ -171,7 +171,7 @@ export function createMockBackend(): Backend {
       id: "c-s3",
       name: "Media bucket",
       kind: "s3",
-      options: { bucket: "atlas-media", region: "eu-west-1", accessKeyId: "AKIA…" },
+      options: { bucket: "5files-media", region: "eu-west-1", accessKeyId: "AKIA…" },
       color: "#f59e0b",
       createdAt: now - 20 * DAY,
       insecureSecrets: false,

@@ -1,6 +1,6 @@
 //! App-scoped I/O accounting.
 //!
-//! Every byte Atlas reads from / writes to a local disk or sends / receives over the
+//! Every byte 5files reads from / writes to a local disk or sends / receives over the
 //! network flows through the counting wrappers below, so the numbers reflect *only*
 //! this app's activity (not system-wide traffic), and the measurement is identical on
 //! macOS, Windows and Linux.

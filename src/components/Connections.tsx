@@ -207,7 +207,7 @@ function Editor({ existing, kind, onBack }: { existing?: Connection; kind: ConnK
 
   const remove = async () => {
     if (!existing) return;
-    const ok = await confirmDialog({ title: `Remove “${existing.name}”?`, body: "Atlas forgets this connection and its saved credentials. Files on the server aren't touched.", confirm: "Remove", danger: true });
+    const ok = await confirmDialog({ title: `Remove “${existing.name}”?`, body: "5files forgets this connection and its saved credentials. Files on the server aren't touched.", confirm: "Remove", danger: true });
     if (!ok) return;
     await api().deleteConnection(existing.id);
     await useDrives.getState().refreshConnections();
@@ -257,7 +257,7 @@ function Editor({ existing, kind, onBack }: { existing?: Connection; kind: ConnK
 
         {kind === "gdrive" && (
           <div className="mt-5 rounded-xl border border-line bg-surface-2 p-3.5">
-            <p className="text-[12.5px] font-medium">{needsGoogle ? "Sign in to give Atlas access to your Drive" : "Signed in with Google"}</p>
+            <p className="text-[12.5px] font-medium">{needsGoogle ? "Sign in to give 5files access to your Drive" : "Signed in with Google"}</p>
             <p className="mt-0.5 text-2xs text-ink-3">Your browser opens Google's sign-in page. The access token is kept in your system keychain.</p>
             <button
               onClick={google}

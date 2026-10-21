@@ -4,5 +4,5 @@ port: 6065
 directory: /data
 permissions: CRUD
 users:
-  - username: atlas
-    password: atlaspass
+  - username: fivefiles
+    password: fivefilespass

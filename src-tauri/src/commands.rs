@@ -420,10 +420,10 @@ pub fn frontend_log(level: String, message: String) {
     eprintln!("[webview:{level}] {message}");
 }
 
-/// Directory for the built-in end-to-end smoke run (`ATLAS_E2E=<dir>`), if enabled.
+/// Directory for the built-in end-to-end smoke run (`FIVEFILES_E2E=<dir>`), if enabled.
 #[tauri::command]
 pub fn e2e_dir() -> Option<String> {
-    std::env::var("ATLAS_E2E").ok().filter(|d| !d.is_empty())
+    std::env::var("FIVEFILES_E2E").ok().filter(|d| !d.is_empty())
 }
 
 /// Starts an upload into `dir`; the name is validated and made unique. Returns an id.

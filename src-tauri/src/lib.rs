@@ -27,10 +27,10 @@ pub fn run() {
     build(tauri::Builder::default()).run(tauri::generate_context!()).expect("error while running tauri application");
 }
 
-/// Directory for config + secrets fallback. `ATLAS_CONFIG_DIR` overrides it (portable
+/// Directory for config + secrets fallback. `FIVEFILES_CONFIG_DIR` overrides it (portable
 /// installs, tests).
 fn config_dir<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<std::path::PathBuf> {
-    match std::env::var_os("ATLAS_CONFIG_DIR") {
+    match std::env::var_os("FIVEFILES_CONFIG_DIR") {
         Some(d) => Ok(d.into()),
         None => app.path().app_config_dir(),
     }
@@ -43,7 +43,7 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
-            let cache = ctx.app_handle().path().app_cache_dir().unwrap_or_else(|_| std::env::temp_dir().join("atlas")).join("thumbs");
+            let cache = ctx.app_handle().path().app_cache_dir().unwrap_or_else(|_| std::env::temp_dir().join("5files")).join("thumbs");
             let uri = request.uri().to_string();
             tauri::async_runtime::spawn(async move {
                 responder.respond(thumbs::respond(uri, cache).await);
@@ -101,7 +101,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
     let _ = std::fs::remove_dir_all(&temp_dir);
 
     let local: vfs::DynProvider = Arc::new(vfs::local::LocalFs);
-    let use_keychain = std::env::var_os("ATLAS_NO_KEYCHAIN").is_none();
+    let use_keychain = std::env::var_os("FIVEFILES_NO_KEYCHAIN").is_none();
     let conns = Arc::new(connections::Connections::load_with(config_dir, use_keychain));
 
     let dirty = Arc::new(AtomicBool::new(true));
@@ -168,7 +168,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
             if let Some(w) = handle.get_webview_window("main")
                 && !w.is_visible().unwrap_or(true)
             {
-                eprintln!("[atlas] window was not shown by the UI; showing it");
+                eprintln!("[5files] window was not shown by the UI; showing it");
                 let _ = w.show();
             }
         });

@@ -38,7 +38,7 @@ function RenameInput({ tab, entry, className }: { tab: Tab; entry: Entry; classN
     done.current = true;
     if (commit) void commitRename(tab, entry, ref.current!.value);
     else useTabs.getState().patch(tab.id, { renaming: null });
-    window.dispatchEvent(new Event("atlas:focus-list"));
+    window.dispatchEvent(new Event("5files:focus-list"));
   };
   return (
     <input
@@ -504,8 +504,8 @@ export function FileView({ tab }: { tab: Tab }) {
       const t = useTabs.getState().tabs.find((x) => x.id === tab.id);
       if (t && !t.selection.size && order[0]) setSel({ selection: new Set([order[0]]), anchor: order[0], focus: order[0] });
     };
-    window.addEventListener("atlas:focus-list", focus);
-    return () => window.removeEventListener("atlas:focus-list", focus);
+    window.addEventListener("5files:focus-list", focus);
+    return () => window.removeEventListener("5files:focus-list", focus);
   }, [order, tab.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Focus the list when a tab is shown so arrow keys work immediately.
   useEffect(() => {

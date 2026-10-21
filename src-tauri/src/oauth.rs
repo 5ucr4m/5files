@@ -83,7 +83,7 @@ fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Atlas</title><body style=\"font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#0b0d12;color:#e7e9ee\"><div style=\"text-align:center\"><h2>You're signed in ✓</h2><p style=\"opacity:.7\">You can close this tab and return to Atlas.</p></div>";
+const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>5files</title><body style=\"font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#0b0d12;color:#e7e9ee\"><div style=\"text-align:center\"><h2>You're signed in ✓</h2><p style=\"opacity:.7\">You can close this tab and return to 5files.</p></div>";
 
 /// Runs the whole flow. `open` launches the system browser on the consent URL.
 pub async fn google_sign_in(client_id: &str, client_secret: &str, open: impl FnOnce(&str) -> AppResult<()>) -> AppResult<String> {

@@ -164,7 +164,7 @@ export function Sidebar() {
         label: "Remove drive…",
         danger: true,
         run: async () => {
-          const ok = await confirmDialog({ title: `Remove “${c.name}”?`, body: "Atlas forgets this connection and its saved credentials. Files on the server aren't touched.", confirm: "Remove", danger: true });
+          const ok = await confirmDialog({ title: `Remove “${c.name}”?`, body: "5files forgets this connection and its saved credentials. Files on the server aren't touched.", confirm: "Remove", danger: true });
           if (!ok) return;
           await api().deleteConnection(c.id);
           await useDrives.getState().refreshConnections();

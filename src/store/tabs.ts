@@ -55,7 +55,7 @@ interface TabsState {
   select: (id: string, paths: string[], opts?: { anchor?: string | null; focus?: string | null }) => void;
 }
 
-const SESSION_KEY = "atlas.session.v1";
+const SESSION_KEY = "5files.session.v1";
 let counter = 0;
 const tabId = () => `t${Date.now().toString(36)}${(counter++).toString(36)}`;
 

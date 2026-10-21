@@ -42,7 +42,7 @@ pub struct SpoolWriter {
 
 impl SpoolWriter {
     pub async fn new(put: Arc<HttpPut>, path: &str) -> io::Result<Self> {
-        let tmp = std::env::temp_dir().join(format!("atlas-upload-{}", uuid::Uuid::new_v4().simple()));
+        let tmp = std::env::temp_dir().join(format!("5files-upload-{}", uuid::Uuid::new_v4().simple()));
         let file = tokio::fs::File::create(&tmp).await?;
         Ok(Self { file: Some(file), tmp, url: put.url(path), put, upload: None })
     }

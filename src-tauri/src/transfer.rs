@@ -535,7 +535,7 @@ impl Manager {
         let write_to = if staged {
             let parent = dst.parent(to).unwrap_or_else(|| dst.root());
             let tag = &uuid::Uuid::new_v4().simple().to_string()[..8];
-            dst.join(&parent, &format!(".{}.atlas-part-{tag}", dst.file_name(to)))
+            dst.join(&parent, &format!(".{}.5files-part-{tag}", dst.file_name(to)))
         } else {
             to.to_string()
         };

@@ -48,7 +48,7 @@ jobs:
       - name: Rust tests (unit + IPC end-to-end)
         working-directory: src-tauri
         env:
-          ATLAS_NO_KEYCHAIN: "1"
+          FIVEFILES_NO_KEYCHAIN: "1"
         run: cargo test --locked
 
   remote-integration:
@@ -112,7 +112,7 @@ jobs:
           args: ${{ matrix.args }}
       - uses: actions/upload-artifact@v4
         with:
-          name: atlas-${{ matrix.platform }}
+          name: 5files-${{ matrix.platform }}
           path: |
             src-tauri/target/**/release/bundle/**/*.dmg
             src-tauri/target/**/release/bundle/**/*.msi

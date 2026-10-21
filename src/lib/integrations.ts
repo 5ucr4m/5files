@@ -120,7 +120,7 @@ export const INTEGRATIONS: Integration[] = [
         label: "Trusted server key",
         type: "text",
         placeholder: "Saved on first connect",
-        help: "Atlas refuses to connect if the server's key changes. Clear this only if you know the server was reinstalled or its key rotated.",
+        help: "5files refuses to connect if the server's key changes. Clear this only if you know the server was reinstalled or its key rotated.",
       },
     ],
   },

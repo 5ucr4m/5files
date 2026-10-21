@@ -82,8 +82,8 @@ function PathBar({ tab }: { tab: Tab }) {
   }, [tab.listing?.crumbs.length, tab.path]);
   useEffect(() => {
     const onKey = () => setEditing(true);
-    window.addEventListener("atlas:edit-path", onKey);
-    return () => window.removeEventListener("atlas:edit-path", onKey);
+    window.addEventListener("5files:edit-path", onKey);
+    return () => window.removeEventListener("5files:edit-path", onKey);
   }, []);
 
   const crumbs = tab.listing?.crumbs ?? [];
@@ -149,8 +149,8 @@ function SearchBox({ tab }: { tab: Tab }) {
   useEffect(() => setValue(tab.search?.query ?? tab.filter), [tab.id, tab.nav]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const focus = () => input.current?.focus();
-    window.addEventListener("atlas:focus-search", focus);
-    return () => window.removeEventListener("atlas:focus-search", focus);
+    window.addEventListener("5files:focus-search", focus);
+    return () => window.removeEventListener("5files:focus-search", focus);
   }, []);
 
   const stopSearch = () => {
@@ -209,7 +209,7 @@ function SearchBox({ tab }: { tab: Tab }) {
           }
           if (e.key === "ArrowDown") {
             input.current?.blur();
-            window.dispatchEvent(new Event("atlas:focus-list"));
+            window.dispatchEvent(new Event("5files:focus-list"));
           }
           e.stopPropagation();
         }}

@@ -1,4 +1,4 @@
-// Built-in end-to-end smoke run, enabled with `ATLAS_E2E=<empty dir>`. Drives the real
+// Built-in end-to-end smoke run, enabled with `FIVEFILES_E2E=<empty dir>`. Drives the real
 // UI stores (same code paths as clicks/shortcuts) inside the real webview and reports
 // PASS/FAIL to the app log, covering native events, the watcher and metrics.
 import { invoke } from "@tauri-apps/api/core";
@@ -39,7 +39,7 @@ export async function runE2E(dir: string) {
       await until("rename mode", () => tab().renaming?.endsWith("untitled folder"));
       tabs.patch(tab().id, { renaming: null });
     });
-    await step("watcher picks up a file created outside Atlas", async () => {
+    await step("watcher picks up a file created outside 5files", async () => {
       await api().createFile("local", dir, "external.txt");
       await until("watcher refresh", () => tab().listing?.entries.some((e) => e.name === "external.txt"), 8000);
     });

@@ -184,7 +184,7 @@ export function IoMonitor() {
     <div ref={box} className="no-drag relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="Disk and network activity from Atlas"
+        title="Disk and network activity from 5files"
         className={`flex h-[34px] items-center gap-3 rounded-[9px] px-2.5 transition-colors hover:bg-chrome-active ${open ? "bg-chrome-active" : ""}`}
       >
         <Compact lane="disk" label="DSK" />
@@ -212,7 +212,7 @@ function MonitorPanel() {
     >
       <div className="mb-3 flex items-baseline justify-between">
         <h3 className="text-[13px] font-semibold tracking-tight">Activity</h3>
-        <span className="text-2xs text-ink-3">Atlas only · last 60 s</span>
+        <span className="text-2xs text-ink-3">5files only · last 60 s</span>
       </div>
       <div className="space-y-4">
         {rows.map(({ lane, title, a, b }) => {

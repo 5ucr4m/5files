@@ -36,7 +36,7 @@ interface SettingsState {
   toggleFavorite: (f: Favorite) => void;
 }
 
-const KEY = "atlas.settings.v1";
+const KEY = "5files.settings.v1";
 
 function load(): Partial<SettingsState> {
   try {
