@@ -209,16 +209,42 @@ function useShortcuts() {
       if (e.altKey && e.key === "ArrowUp") return stop(), tabs.up(t.id);
       if (e.key === "F5" || (mod && k === "r")) return stop(), void tabs.refresh(t.id);
     };
-    const onMouse = (e: MouseEvent) => {
-      const t = activeTab();
-      if (!t) return;
-      if (e.button === 3) (e.preventDefault(), useTabs.getState().back(t.id));
-      if (e.button === 4) (e.preventDefault(), useTabs.getState().forward(t.id));
+    // Mouse back/forward buttons act on the pane under the pointer (like a browser
+    // window), falling back to the focused one.
+    let pointer = { x: -1, y: -1 };
+    const paneAt = (x: number, y: number) => {
+      const id = (document.elementFromPoint(x, y)?.closest("[data-pane-id]") as HTMLElement | null)?.dataset.paneId;
+      return id && useTabs.getState().tabs.some((t) => t.id === id) ? id : activeTab()?.id;
     };
+    const mouseNav = (dir: "back" | "forward", x: number, y: number) => {
+      const id = paneAt(x, y);
+      if (!id) return;
+      if (useUi.getState().panel || useUi.getState().quickLook) return;
+      useLayout.getState().focusPane(id);
+      if (dir === "back") useTabs.getState().back(id);
+      else useTabs.getState().forward(id);
+    };
+    const onMove = (e: MouseEvent) => (pointer = { x: e.clientX, y: e.clientY });
+    // Windows / Linux deliver the buttons to the page (3 = back, 4 = forward); cancelling
+    // them also stops the webview from navigating its own history.
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 3 || e.button === 4) e.preventDefault();
+    };
+    const onMouse = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      mouseNav(e.button === 3 ? "back" : "forward", e.clientX, e.clientY);
+    };
+    const nativeNav = api().onMouseNav((dir) => mouseNav(dir, pointer.x, pointer.y));
     window.addEventListener("keydown", onPrefix, true);
     window.addEventListener("keydown", onKey);
     window.addEventListener("mouseup", onMouse);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMove, { passive: true });
     return () => {
+      void nativeNav.then((u) => u());
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMove);
       clearTimeout(prefixTimer);
       window.removeEventListener("keydown", onPrefix, true);
       window.removeEventListener("keydown", onKey);

@@ -672,6 +672,7 @@ export function createMockBackend(): Backend {
       pushShares();
     },
     onShares: (cb) => sharesEv.on(cb),
+    onMouseNav: () => Promise.resolve(() => {}),
     async openUrl(url) {
       window.open(url, "_blank", "noopener");
     },

@@ -2,6 +2,7 @@ pub mod commands;
 pub mod connections;
 pub mod error;
 pub mod metrics;
+pub mod mouse_nav;
 pub mod oauth;
 pub mod search;
 pub mod share;
@@ -251,6 +252,10 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
                 let _ = w.show();
             }
         });
+    }
+    // Native hooks need the real main thread (not there in headless test runs).
+    if std::env::var_os("FIVEFILES_NO_TRAY").is_none() {
+        mouse_nav::install(&handle);
     }
     // Tray icon (optional: some Linux desktops have no tray).
     // FIVEFILES_NO_TRAY: headless test runs (native menus need the main thread).

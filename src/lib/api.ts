@@ -48,6 +48,8 @@ export interface Backend {
   setBackgroundMode(enabled: boolean): Promise<void>;
   /** The tray menu asked to show a panel ("transfers" | "syncs"). */
   onTrayOpen(cb: (what: string) => void): Promise<Unlisten>;
+  /** Mouse back/forward buttons caught natively (macOS, where the webview doesn't see them). */
+  onMouseNav(cb: (dir: "back" | "forward") => void): Promise<Unlisten>;
   /** Ejects a removable volume by its mount point. */
   eject(mount: string): Promise<void>;
   places(): Promise<Place[]>;
@@ -183,6 +185,7 @@ async function tauriBackend(): Promise<Backend> {
     shareUpdate: (id, options) => invoke("share_update", { id, options }),
     shareStop: (id) => invoke("share_stop", { id }),
     onShares: (cb) => listen<ShareView[]>("shares", (e) => cb(e.payload)),
+    onMouseNav: (cb) => listen<"back" | "forward">("mouse-nav", (e) => cb(e.payload)),
     async openUrl(url) {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(url);
