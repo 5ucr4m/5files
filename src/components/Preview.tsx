@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../lib/api";
 import { PREVIEWABLE_AUDIO, PREVIEWABLE_IMAGE, PREVIEWABLE_VIDEO, categoryOf, formatBytes, formatDateFull, kindLabel } from "../lib/format";
 import { openEntry, plural, selectedEntries } from "../lib/ops";
-import type { DirSize, Entry, FsId, TextPreview } from "../lib/types";
+import type { Entry, FsId, TextPreview } from "../lib/types";
 import { useSettings } from "../store/settings";
 import { useActiveTab, useTabs } from "../store/tabs";
 import { useUi } from "../store/ui";
+import { folderSize, useSizes } from "../store/sizes";
+import { measureFolders } from "../lib/sizes";
 import { FileIcon } from "./FileIcon";
 import { visibleEntries } from "./FileView";
 
@@ -128,24 +130,17 @@ function Meta({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function FolderSize({ fs, path }: { fs: FsId; path: string }) {
-  const [size, setSize] = useState<DirSize | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => setSize(null), [path]);
-  if (size) return <>{`${formatBytes(size.bytes)} · ${plural(size.files, "file")}, ${plural(size.dirs, "folder")}`}</>;
+  const size = useSizes((s) => folderSize(s.sizes, fs, path));
+  if (size)
+    return (
+      <>
+        {formatBytes(size.bytes)}
+        {size.done ? ` · ${plural(size.files, "file")}` : <span className="animate-pulse text-ink-4"> counting…</span>}
+      </>
+    );
   return (
-    <button
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          setSize(await api().dirSize(fs, path));
-        } finally {
-          setBusy(false);
-        }
-      }}
-      className="font-sans font-medium text-accent hover:underline disabled:text-ink-4"
-    >
-      {busy ? "Calculating…" : "Calculate"}
+    <button onClick={() => measureFolders(fs, [path], true)} className="font-sans font-medium text-accent hover:underline">
+      Calculate
     </button>
   );
 }

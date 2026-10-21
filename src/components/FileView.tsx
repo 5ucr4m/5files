@@ -9,7 +9,10 @@ import { commitRename, copySelection, deleteSelection, newFolder, openEntry, pas
 import { isMac, isMod } from "../lib/platform";
 import { clickSelect, hitGrid, hitList, jumpTo, moveFocus, normRect, typeAhead } from "../lib/selection";
 import type { Entry } from "../lib/types";
+import { useDrives } from "../store/live";
 import { useSettings } from "../store/settings";
+import { folderSize, useSizes, type FolderSize } from "../store/sizes";
+import { isVolumeRoot, measureFolders } from "../lib/sizes";
 import { useTabs, type Tab } from "../store/tabs";
 import { toast, useUi } from "../store/ui";
 import { FileIcon } from "./FileIcon";
@@ -17,11 +20,24 @@ import { FileIcon } from "./FileIcon";
 const HEADER_H = 30;
 const GRID_PAD = 12;
 
-export function visibleEntries(tab: Tab, showHidden: boolean, foldersFirst: boolean): Entry[] {
+export function visibleEntries(tab: Tab, showHidden: boolean, foldersFirst: boolean, sizes?: Record<string, FolderSize>): Entry[] {
   const base = tab.search ? tab.search.results : (tab.listing?.entries ?? []);
   const f = tab.filter.trim().toLowerCase();
   const list = base.filter((e) => (showHidden || !e.hidden) && (!f || e.name.toLowerCase().includes(f)));
-  return sortEntries(list, tab.sort, foldersFirst);
+  const sizeOf = sizes && tab.sort.key === "size" ? (e: Entry) => folderSize(sizes, tab.fs, e.path)?.bytes : undefined;
+  return sortEntries(list, tab.sort, foldersFirst, sizeOf);
+}
+
+/** Size cell text for a folder: measured, still counting, or unknown. */
+function FolderSizeCell({ size }: { size: FolderSize | undefined }) {
+  if (!size) return <>—</>;
+  if (size.done) return <span title={`${size.files.toLocaleString()} files`}>{formatBytes(size.bytes)}</span>;
+  return (
+    <span className="text-ink-4" title="Still counting…">
+      {formatBytes(size.bytes)}
+      <span className="animate-pulse">…</span>
+    </span>
+  );
 }
 
 function RenameInput({ tab, entry, className }: { tab: Tab; entry: Entry; className?: string }) {
@@ -102,6 +118,7 @@ const Row = memo(function Row({
   showPath,
   thumbs,
   handlers,
+  dirSize,
 }: {
   tab: Tab;
   entry: Entry;
@@ -113,6 +130,7 @@ const Row = memo(function Row({
   showPath: boolean;
   thumbs: boolean;
   handlers: ItemHandlers;
+  dirSize?: FolderSize;
 }) {
   const drop = useDropTarget(tab, entry);
   return (
@@ -147,7 +165,7 @@ const Row = memo(function Row({
         )}
       </div>
       <div className="num truncate text-[12px] text-ink-3">{formatDate(entry.modified)}</div>
-      <div className="num truncate text-right text-[12px] text-ink-3">{entry.isDir ? "—" : formatBytes(entry.size)}</div>
+      <div className="num truncate text-right text-[12px] text-ink-3">{entry.isDir ? <FolderSizeCell size={dirSize} /> : formatBytes(entry.size)}</div>
       <div className="truncate text-[12px] text-ink-3">{kindLabel(entry)}</div>
     </div>
   );
@@ -286,7 +304,24 @@ export function FileView({ tab }: { tab: Tab }) {
   const density = useSettings((s) => s.density);
   const gridSize = useSettings((s) => s.gridSize);
   const clipboard = useUi((s) => s.clipboard);
-  const entries = useMemo(() => visibleEntries(tab, showHidden, foldersFirst), [tab.listing, tab.search, tab.filter, tab.sort, showHidden, foldersFirst]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sizes = useSizes((s) => s.sizes);
+  const sizesNonce = useSizes((s) => s.nonce);
+  const autoSizes = useSettings((s) => s.folderSizes);
+  const volumes = useDrives((s) => s.volumes);
+  // Re-sorting on every progress tick would make rows jump: only size-sorted views follow sizes.
+  const sortSizes = tab.sort.key === "size" ? sizes : undefined;
+  const entries = useMemo(() => visibleEntries(tab, showHidden, foldersFirst, sortSizes), [tab.listing, tab.search, tab.filter, tab.sort, showHidden, foldersFirst, sortSizes]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Measure the folders of this listing in the background (local, below a drive's top level).
+  const lastNonce = useRef(sizesNonce);
+  useEffect(() => {
+    const l = tab.listing;
+    if (!autoSizes || !l || tab.search || tab.fs !== "local" || isVolumeRoot(tab.fs, l.path, l.parent, volumes)) return;
+    const dirs = l.entries.filter((e) => e.isDir && !e.isSymlink && (showHidden || !e.hidden)).map((e) => e.path);
+    const force = lastNonce.current !== sizesNonce;
+    lastNonce.current = sizesNonce;
+    return measureFolders(tab.fs, dirs, force);
+  }, [tab.listing, tab.search, tab.fs, autoSizes, showHidden, volumes.length, sizesNonce]); // eslint-disable-line react-hooks/exhaustive-deps
   const order = useMemo(() => entries.map((e) => e.path), [entries]);
   const byPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries]);
   const cutSet = useMemo(() => new Set(clipboard?.mode === "cut" ? clipboard.items.filter((i) => i.fs === tab.fs).map((i) => i.path) : []), [clipboard, tab.fs]);
@@ -593,6 +628,7 @@ export function FileView({ tab }: { tab: Tab }) {
                   showPath={!!tab.search}
                   thumbs={thumbs}
                   handlers={handlers}
+                  dirSize={entry.isDir ? folderSize(sizes, tab.fs, entry.path) : undefined}
                 />
               </div>
             );

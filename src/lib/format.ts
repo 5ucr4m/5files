@@ -139,14 +139,16 @@ export interface Sort {
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** Folders first, then natural-order sort by the chosen key (name as tie-breaker). */
-export function sortEntries(entries: Entry[], sort: Sort, foldersFirst = true): Entry[] {
+export function sortEntries(entries: Entry[], sort: Sort, foldersFirst = true, sizeOf?: (e: Entry) => number | undefined): Entry[] {
+  const size = (e: Entry) => (e.isDir ? (sizeOf?.(e) ?? -1) : e.size);
   const mul = sort.dir === "asc" ? 1 : -1;
   return [...entries].sort((a, b) => {
     if (foldersFirst && a.isDir !== b.isDir) return a.isDir ? -1 : 1;
     let r = 0;
     switch (sort.key) {
       case "size":
-        r = a.size - b.size;
+        // Folders sort by their measured size; unmeasured ones go last.
+        r = size(a) - size(b);
         break;
       case "modified":
         r = (a.modified ?? 0) - (b.modified ?? 0);

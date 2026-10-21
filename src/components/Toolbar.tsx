@@ -25,6 +25,7 @@ import type { SortKey } from "../lib/format";
 import { newFile, newFolder } from "../lib/ops";
 import { kbd } from "../lib/platform";
 import { useSettings } from "../store/settings";
+import { useSizes } from "../store/sizes";
 import { useTabs, type Tab } from "../store/tabs";
 import { toast, useUi } from "../store/ui";
 
@@ -275,7 +276,13 @@ export function Toolbar({ tab }: { tab: Tab }) {
       >
         <Star size={15} className={isFav ? "fill-accent text-accent" : ""} />
       </Btn>
-      <Btn label="Refresh" onClick={() => tabs.refresh(tab.id)}>
+      <Btn
+        label="Refresh"
+        onClick={() => {
+          useSizes.getState().bump();
+          void tabs.refresh(tab.id);
+        }}
+      >
         <RefreshCw size={14} />
       </Btn>
       <span className="mx-0.5 h-5 w-px bg-line" />

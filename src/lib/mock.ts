@@ -471,6 +471,24 @@ export function createMockBackend(): Backend {
       return "s1";
     },
     async cancelSearch() {},
+    async folderSizes(fs, paths, _force, onEvent) {
+      paths.forEach((path, i) => {
+        let n: Node;
+        try {
+          n = lookup(fs, path);
+        } catch {
+          return onEvent({ type: "error", path, message: "not found" });
+        }
+        let files = 0;
+        const walk = (x: Node) => x.children?.forEach((c) => (c.dir ? walk(c) : files++));
+        walk(n);
+        const bytes = treeBytes(n);
+        // Big folders "count up" for a moment, like the real thing.
+        setTimeout(() => onEvent({ type: "progress", path, bytes: Math.round(bytes * 0.4), files }), 120 + i * 60);
+        setTimeout(() => onEvent({ type: "done", path, bytes, files }), 500 + i * 120);
+      });
+      return "sizes";
+    },
     async open() {
       return null;
     },

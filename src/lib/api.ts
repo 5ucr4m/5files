@@ -12,6 +12,7 @@ import type {
   Place,
   Platform,
   SearchEvent,
+  SizeEvent,
   TextPreview,
   Volume,
 } from "./types";
@@ -50,6 +51,8 @@ export interface Backend {
   watch(paths: string[]): Promise<void>;
   search(fs: FsId, root: string, query: string, includeHidden: boolean, onEvent: (e: SearchEvent) => void): Promise<string>;
   cancelSearch(id: string): Promise<void>;
+  /** Measures folders in the background; events stream per folder. Stop with `cancelSearch`. */
+  folderSizes(fs: FsId, paths: string[], force: boolean, onEvent: (e: SizeEvent) => void): Promise<string>;
   open(fs: FsId, path: string): Promise<string | null>;
   /** Streams a browser File (OS drop without a path, i.e. Windows) into `dir`; returns the new path. */
   uploadFile(fs: FsId, dir: string, file: File, onProgress?: (done: number) => void): Promise<string>;
@@ -117,6 +120,11 @@ async function tauriBackend(): Promise<Backend> {
       return invoke("search_start", { fs, root, query, includeHidden, onEvent: ch });
     },
     cancelSearch: (id) => invoke("search_cancel", { id }),
+    folderSizes: (fs, paths, force, onEvent) => {
+      const ch = new Channel<SizeEvent>();
+      ch.onmessage = onEvent;
+      return invoke("folder_sizes", { fs, paths, force, onEvent: ch });
+    },
     open: (fs, path) => invoke("open_item", { fs, path }),
     async uploadFile(fs, dir, file, onProgress) {
       const id = await invoke<string>("upload_begin", { fs, dir, name: file.name });

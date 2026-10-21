@@ -56,6 +56,11 @@ describe("sortEntries", () => {
   it("puts folders first and sorts naturally", () => {
     expect(sortEntries(list, { key: "name", dir: "asc" }).map((x) => x.name)).toEqual(["alpha", "Zeta", "file2.txt", "file10.txt"]);
   });
+  it("sorts folders by measured size", () => {
+    const sizes: Record<string, number> = { "/Zeta": 10, "/alpha": 500 };
+    const out = sortEntries(list, { key: "size", dir: "desc" }, true, (e) => sizes[e.path]);
+    expect(out.map((x) => x.name)).toEqual(["alpha", "Zeta", "file2.txt", "file10.txt"]);
+  });
   it("sorts by size descending but keeps folders first", () => {
     expect(sortEntries(list, { key: "size", dir: "desc" }).map((x) => x.name)).toEqual(["Zeta", "alpha", "file2.txt", "file10.txt"]);
   });

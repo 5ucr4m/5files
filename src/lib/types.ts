@@ -157,3 +157,8 @@ export interface AppError {
   kind: string;
   message: string;
 }
+
+export type SizeEvent =
+  | { type: "progress"; path: string; bytes: number; files: number }
+  | { type: "done"; path: string; bytes: number; files: number }
+  | { type: "error"; path: string; message: string };

@@ -100,6 +100,8 @@ pub struct JobSnapshot {
     pub open_after: bool,
     /// Final paths created in the destination (top-level items only).
     pub outputs: Vec<String>,
+    /// What the job was asked to copy/move/delete.
+    pub sources: Vec<Loc>,
 }
 
 struct Job {
@@ -196,6 +198,7 @@ impl Manager {
             finished_at: None,
             open_after: req.open_after,
             outputs: vec![],
+            sources: req.sources.clone(),
         };
         let (pause, _) = watch::channel(false);
         let job =

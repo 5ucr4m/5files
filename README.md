@@ -14,6 +14,9 @@ queue with real progress, and a live monitor in the title bar shows how much dis
 - Editable path bar (click empty space or `⌘L`/`Ctrl+L`, `~` expands), breadcrumbs that accept drops
 - Instant filter as you type; `Enter` searches all subfolders, streaming results (globs like `*.pdf` work)
 - Quick Look (`Space`), preview pane with images, video, audio, PDF and code/text, folder size on demand
+- Folder sizes in the Size column, measured in the background with a parallel walker (about 4× faster
+  than `du` on large trees), streamed while counting, cached and kept fresh. Automatic below a drive's
+  top level; right-click → Calculate size anywhere, remote drives included
 - Image thumbnails generated in Rust, cached on disk and decoded off the UI thread
 - Live refresh when files change on disk (watcher), hidden files toggle, favorites, OS trash
 
@@ -82,6 +85,7 @@ src-tauri/src
 ├── thumbs.rs       thumb:// protocol (decode, resize, disk cache)
 ├── watcher.rs      folder watching (notify) → refresh events
 ├── search.rs       streaming recursive search
+├── sizes.rs        folder sizes: parallel walk, streaming, cache + invalidation
 ├── oauth.rs        Google OAuth (loopback + PKCE)
 └── commands.rs     the IPC surface
 

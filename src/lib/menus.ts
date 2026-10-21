@@ -15,10 +15,12 @@ import {
   Trash2,
   CopyPlus,
   ExternalLink,
+  Ruler,
 } from "lucide-react";
 import { api } from "./api";
 import { copySelection, deleteSelection, newFile, newFolder, openEntry, paste, selectedEntries, transfer } from "./ops";
 import { isMac, kbd } from "./platform";
+import { measureFolders } from "./sizes";
 import type { Entry } from "./types";
 import { useSettings } from "../store/settings";
 import { useTabs, type Tab } from "../store/tabs";
@@ -64,6 +66,14 @@ export function itemMenu(tab: Tab, entry: Entry): MenuItem[] {
   }
   items.push({ label: many ? "Copy paths" : "Copy path", icon: Link2, shortcut: kbd("Mod+Alt+C"), run: () => copyText(sel.map((e) => e.path).join("\n"), many ? "paths" : "path") });
   if (local && !many) items.push({ label: revealLabel(), icon: ExternalLink, run: () => api().reveal(entry.path) });
+  const dirs = sel.filter((e) => e.isDir);
+  if (dirs.length) {
+    items.push({
+      label: dirs.length > 1 ? `Calculate size of ${dirs.length} folders` : "Calculate size",
+      icon: Ruler,
+      run: () => void measureFolders(tab.fs, dirs.map((e) => e.path), true),
+    });
+  }
   items.push({ label: "Get info", icon: Info, shortcut: kbd("Mod+I"), run: () => useSettings.getState().set({ previewPane: true }) });
   items.push({ divider: true });
   items.push(

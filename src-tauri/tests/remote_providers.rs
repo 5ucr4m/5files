@@ -369,7 +369,10 @@ async fn webdav_roundtrip() {
     let _wd = watchdog("webdav_roundtrip", 120);
     let c = conn(
         Kind::Webdav,
-        opts(&[("url", env_or("FIVEFILES_WEBDAV_URL", "http://127.0.0.1:28080")), ("username", env_or("FIVEFILES_WEBDAV_USER", "fivefiles"))]),
+        opts(&[
+            ("url", env_or("FIVEFILES_WEBDAV_URL", "http://127.0.0.1:28080")),
+            ("username", env_or("FIVEFILES_WEBDAV_USER", "fivefiles")),
+        ]),
     );
     let secrets = opts(&[("password", env_or("FIVEFILES_WEBDAV_PASS", "fivefilespass"))]);
     let p = connections::build(&c, &secrets).await.unwrap().provider;

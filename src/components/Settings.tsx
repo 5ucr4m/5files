@@ -104,6 +104,9 @@ export function SettingsPanel() {
             ]}
           />
         </Row>
+        <Row label="Show folder sizes" hint="Measured in the background for folders on this computer. Off at a drive's top level; right-click → Calculate size works anywhere.">
+          <Toggle label="Show folder sizes" on={s.folderSizes} onChange={(folderSizes) => s.set({ folderSizes })} />
+        </Row>
         <Row label="Show hidden files">
           <Toggle label="Show hidden files" on={s.showHidden} onChange={(showHidden) => s.set({ showHidden })} />
         </Row>

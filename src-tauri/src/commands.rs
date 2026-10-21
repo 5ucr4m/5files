@@ -27,7 +27,9 @@ pub struct AppState {
     pub conns: Arc<Connections>,
     pub transfers: Arc<Manager>,
     pub watcher: Watcher,
+    /// Cancellable background tasks (searches, folder sizes) by id.
     pub searches: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    pub sizes: Arc<crate::sizes::SizeCache>,
     pub temp_dir: std::path::PathBuf,
     pub uploads: Uploads,
 }
@@ -420,10 +422,18 @@ pub fn frontend_log(level: String, message: String) {
     eprintln!("[webview:{level}] {message}");
 }
 
-/// Directory for the built-in end-to-end smoke run (`FIVEFILES_E2E=<dir>`), if enabled.
+#[derive(Serialize)]
+pub struct E2e {
+    dir: String,
+    /// Optional real folder to time a size measurement on (`FIVEFILES_E2E_BENCH`).
+    bench: Option<String>,
+}
+
+/// Settings for the built-in end-to-end smoke run (`FIVEFILES_E2E=<dir>`), if enabled.
 #[tauri::command]
-pub fn e2e_dir() -> Option<String> {
-    std::env::var("FIVEFILES_E2E").ok().filter(|d| !d.is_empty())
+pub fn e2e_dir() -> Option<E2e> {
+    let dir = std::env::var("FIVEFILES_E2E").ok().filter(|d| !d.is_empty())?;
+    Some(E2e { dir, bench: std::env::var("FIVEFILES_E2E_BENCH").ok().filter(|d| !d.is_empty()) })
 }
 
 /// Starts an upload into `dir`; the name is validated and made unique. Returns an id.
@@ -469,4 +479,34 @@ pub async fn upload_end(state: S<'_>, id: String, cancel: bool) -> AppResult<Str
         return Err(e.into());
     }
     Ok(path)
+}
+
+/// Measures folders in the background, streaming progress through `on_event`.
+/// Returns an id that `search_cancel` stops (both are background tasks).
+#[tauri::command]
+pub async fn folder_sizes(
+    state: S<'_>,
+    fs: String,
+    paths: Vec<String>,
+    force: bool,
+    on_event: Channel<crate::sizes::SizeEvent>,
+) -> AppResult<String> {
+    let p = state.provider(&fs).await?;
+    if force {
+        for path in &paths {
+            state.sizes.invalidate(&fs, path);
+        }
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let token = CancellationToken::new();
+    state.searches.lock().insert(id.clone(), token.clone());
+    let (tasks, cache, tid) = (state.searches.clone(), state.sizes.clone(), id.clone());
+    tauri::async_runtime::spawn(async move {
+        crate::sizes::run(p, fs, paths, cache, token, move |e| {
+            let _ = on_event.send(e);
+        })
+        .await;
+        tasks.lock().remove(&tid);
+    });
+    Ok(id)
 }

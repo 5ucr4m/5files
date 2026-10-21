@@ -5,6 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { api } from "./api";
 import { newFolder, transfer } from "./ops";
 import { useMetrics, useTransfers } from "../store/live";
+import { folderSize, useSizes } from "../store/sizes";
+import { measureFolders } from "./sizes";
 import { activeTab, useTabs } from "../store/tabs";
 
 const log = (message: string) => invoke("frontend_log", { level: "e2e", message });
@@ -20,7 +22,7 @@ async function until<T>(what: string, fn: () => T | undefined | null | false, ms
   }
 }
 
-export async function runE2E(dir: string) {
+export async function runE2E(dir: string, home?: string) {
   const step = async (name: string, f: () => Promise<void>) => {
     await f();
     await log(`ok  ${name}`);
@@ -70,6 +72,26 @@ export async function runE2E(dir: string) {
       const e = tab().listing?.entries.find((x) => x.path === path);
       if (!e || e.size !== bytes.length) throw new Error(`uploaded size ${e?.size}`);
     });
+    await step("folder sizes are measured and streamed", async () => {
+      const folder = `${dir}${sep}untitled folder`;
+      measureFolders("local", [folder], true);
+      const size = await until("folder size", () => {
+        const s = folderSize(useSizes.getState().sizes, "local", folder);
+        return s?.done ? s : null;
+      });
+      if (size.bytes !== 96 * 1024 * 1024 || size.files !== 1) throw new Error(`measured ${size.bytes} bytes / ${size.files} files`);
+    });
+    if (home) {
+      await step(`measures a real folder (${home})`, async () => {
+        const t0 = performance.now();
+        measureFolders("local", [home], true);
+        const size = await until("home size", () => {
+          const s = folderSize(useSizes.getState().sizes, "local", home);
+          return s?.done ? s : null;
+        }, 120000);
+        await log(`    ${size.files.toLocaleString()} files, ${(size.bytes / 1e9).toFixed(2)} GB in ${Math.round(performance.now() - t0)} ms`);
+      });
+    }
     await log("PASS");
   } catch (e) {
     await log(`FAIL ${e instanceof Error ? e.message : String(e)}`);

@@ -4,6 +4,7 @@ pub mod error;
 pub mod metrics;
 pub mod oauth;
 pub mod search;
+pub mod sizes;
 pub mod thumbs;
 pub mod transfer;
 pub mod vfs;
@@ -88,6 +89,7 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::upload_begin,
             commands::upload_chunk,
             commands::upload_end,
+            commands::folder_sizes,
         ])
 }
 
@@ -116,9 +118,20 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
         let dirty = dirty.clone();
         Arc::new(move || dirty.store(true, Ordering::Relaxed))
     };
+    let sizes = Arc::new(sizes::SizeCache::default());
     let on_done: transfer::OnDone = {
         let handle = handle.clone();
+        let sizes = sizes.clone();
         Arc::new(move |job: &transfer::JobSnapshot| {
+            // Folder sizes containing anything this job touched are stale now.
+            for s in &job.sources {
+                sizes.invalidate(&s.fs, &s.path);
+            }
+            if let Some(d) = &job.dest {
+                for o in &job.outputs {
+                    sizes.invalidate(&d.fs, o);
+                }
+            }
             if job.open_after
                 && let Some(path) = job.outputs.first()
             {
@@ -131,7 +144,11 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
 
     let watcher = {
         let handle = handle.clone();
+        let sizes = sizes.clone();
         watcher::Watcher::new(move |dirs| {
+            for d in &dirs {
+                sizes.invalidate("local", d);
+            }
             let _ = handle.emit("fs-changed", dirs);
         })
     };
@@ -142,6 +159,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
         transfers: transfers.clone(),
         watcher,
         searches: Default::default(),
+        sizes,
         temp_dir,
         uploads: Default::default(),
     });

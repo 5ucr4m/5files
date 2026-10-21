@@ -4,6 +4,7 @@ import { plural, selectedEntries } from "../lib/ops";
 import { platform } from "../lib/platform";
 import { useDrives } from "../store/live";
 import { useSettings } from "../store/settings";
+import { folderSize, useSizes } from "../store/sizes";
 import type { Tab } from "../store/tabs";
 import { useUi } from "../store/ui";
 import { visibleEntries } from "./FileView";
@@ -27,7 +28,18 @@ export function StatusBar({ tab }: { tab: Tab }) {
   const clip = useUi((s) => s.clipboard);
   const items = visibleEntries(tab, showHidden, foldersFirst);
   const sel = selectedEntries(tab);
-  const selBytes = sel.reduce((t, e) => t + (e.isDir ? 0 : e.size), 0);
+  const sizes = useSizes((s) => s.sizes);
+  // Folders count once measured; "+" marks a total that is still missing some.
+  let selBytes = 0;
+  let partial = false;
+  for (const e of sel) {
+    if (!e.isDir) selBytes += e.size;
+    else {
+      const fz = folderSize(sizes, tab.fs, e.path);
+      if (fz) selBytes += fz.bytes;
+      if (!fz?.done) partial = true;
+    }
+  }
   // Longest mount point that prefixes the current path = the volume we're on.
   const vol = tab.fs === "local" ? volumeFor(volumes, tab.path, platform().os) : undefined;
   const hidden = (tab.listing?.entries.length ?? 0) - (tab.listing?.entries.filter((e) => !e.hidden).length ?? 0);
@@ -51,7 +63,7 @@ export function StatusBar({ tab }: { tab: Tab }) {
       </span>
       {sel.length > 0 && (
         <span className="text-ink-2">
-          {sel.length} selected{selBytes > 0 && ` · ${formatBytes(selBytes)}`}
+          {sel.length} selected{selBytes > 0 && ` · ${formatBytes(selBytes)}${partial ? "+" : ""}`}
         </span>
       )}
       {clip && (

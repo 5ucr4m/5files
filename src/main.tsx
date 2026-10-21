@@ -28,8 +28,8 @@ async function boot() {
   setTimeout(() => void backend.window.show(), 30);
   if (isTauri) {
     const { invoke } = await import("@tauri-apps/api/core");
-    const dir = await invoke<string | null>("e2e_dir");
-    if (dir) setTimeout(() => void import("./lib/e2e").then((m) => m.runE2E(dir)), 800);
+    const e2e = await invoke<{ dir: string; bench: string | null } | null>("e2e_dir");
+    if (e2e) setTimeout(() => void import("./lib/e2e").then((m) => m.runE2E(e2e.dir, e2e.bench ?? undefined)), 800);
   }
 }
 
