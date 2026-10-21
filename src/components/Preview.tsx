@@ -10,6 +10,7 @@ import { useActiveTab, useTabs } from "../store/tabs";
 import { useUi } from "../store/ui";
 import { folderSize, useSizes } from "../store/sizes";
 import { measureFolders } from "../lib/sizes";
+import { CountingDots } from "./CountingDots";
 import { FileIcon } from "./FileIcon";
 import { visibleEntries } from "./FileView";
 
@@ -135,7 +136,7 @@ function FolderSize({ fs, path }: { fs: FsId; path: string }) {
     return (
       <>
         {formatBytes(size.bytes)}
-        {size.done ? ` · ${plural(size.files, "file")}` : <span className="animate-pulse text-ink-4"> counting…</span>}
+        {size.done ? ` · ${plural(size.files, "file")}` : <CountingDots />}
       </>
     );
   return (

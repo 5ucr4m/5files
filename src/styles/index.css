@@ -214,3 +214,41 @@ button {
   line-height: 1.6;
   tab-size: 2;
 }
+
+/* Live ellipsis for values still being computed (folder sizes). Dots ride the text
+   baseline like "…", rising in a staggered wave. */
+.counting-dots {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 1em;
+  margin-left: 3px;
+  padding-bottom: 0.18em;
+  vertical-align: baseline;
+}
+.counting-dots > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0.45;
+  animation: counting-wave 1s ease-in-out infinite;
+}
+.counting-dots > span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+.counting-dots > span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+@keyframes counting-wave {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}

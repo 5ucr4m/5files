@@ -16,6 +16,7 @@ import { folderSize, useSizes, type FolderSize } from "../store/sizes";
 import { isVolumeRoot, measureFolders } from "../lib/sizes";
 import { useTabs, type Tab } from "../store/tabs";
 import { toast, useUi } from "../store/ui";
+import { CountingDots } from "./CountingDots";
 import { FileIcon } from "./FileIcon";
 
 const HEADER_H = 30;
@@ -36,7 +37,7 @@ function FolderSizeCell({ size }: { size: FolderSize | undefined }) {
   return (
     <span className="text-ink-4" title="Still counting…">
       {formatBytes(size.bytes)}
-      <span className="animate-pulse">…</span>
+      <CountingDots />
     </span>
   );
 }
