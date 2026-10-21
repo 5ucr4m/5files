@@ -1,4 +1,4 @@
-import { Cloud, Columns2, HardDrive, Maximize2, Minus, Plus, Search, Server, Square, X } from "lucide-react";
+import { Cloud, Columns2, Copy, HardDrive, Keyboard, Maximize2, PanelTopClose, Rows2, Minus, Plus, Search, Server, Square, X } from "lucide-react";
 import { AnimatePresence, Reorder, motion } from "motion/react";
 import { api } from "../lib/api";
 import { isMac, kbd } from "../lib/platform";
@@ -6,7 +6,7 @@ import { useDrives } from "../store/live";
 import { panesOf } from "../lib/layout";
 import { useLayout, type Workspace } from "../store/layout";
 import { useTabs, type Tab } from "../store/tabs";
-import { useUi } from "../store/ui";
+import { useUi, type MenuItem } from "../store/ui";
 import { FolderGlyph } from "./FileIcon";
 import { IoMonitor } from "./IoMonitor";
 import { TransfersButton } from "./Transfers";
@@ -51,8 +51,13 @@ function TabPill({ ws, active }: { ws: Workspace; active: boolean }) {
       exit={{ opacity: 0, scale: 0.9, width: 0, transition: { duration: 0.14 } }}
       transition={{ type: "spring", stiffness: 600, damping: 40 }}
       whileDrag={{ scale: 1.03, zIndex: 10 }}
-      onPointerDown={() => L.activate(ws.id)}
+      onPointerDown={(e) => e.button === 0 && L.activate(ws.id)}
       onAuxClick={(e) => e.button === 1 && L.closeWorkspace(ws.id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        L.activate(ws.id);
+        useUi.getState().openMenu(e.clientX, e.clientY, tabMenu(ws.id));
+      }}
       className="no-drag group relative flex h-[30px] max-w-[220px] min-w-[96px] shrink cursor-default items-center"
       title={panes > 1 ? `${panes} panes${ws.zoom ? " (one zoomed)" : ""} · ${t.path}` : t.path}
     >
@@ -90,6 +95,30 @@ function TabPill({ ws, active }: { ws: Workspace; active: boolean }) {
       </div>
     </Reorder.Item>
   );
+}
+
+/** Right-click on a tab: tab and pane actions, with their shortcuts. */
+function tabMenu(wsId: string): MenuItem[] {
+  const L = useLayout.getState();
+  const tabs = useTabs.getState();
+  const ws = L.workspaces.find((w) => w.id === wsId);
+  if (!ws) return [];
+  const focused = tabs.tabs.find((t) => t.id === ws.focus);
+  const split = panesOf(ws.root).length > 1;
+  return [
+    { label: "New tab", icon: Plus, shortcut: kbd("Mod+T"), run: () => tabs.newTab(undefined, { afterId: ws.focus }) },
+    { label: "Duplicate tab", icon: Copy, run: () => focused && tabs.newTab({ fs: focused.fs, path: focused.path }, { afterId: ws.focus }) },
+    { divider: true },
+    { label: "Split right", icon: Columns2, shortcut: kbd("Mod+\\"), run: () => L.split("row") },
+    { label: "Split down", icon: Rows2, shortcut: kbd("Mod+Shift+\\"), run: () => L.split("col") },
+    { label: ws.zoom ? "Unzoom pane" : "Zoom pane", icon: Maximize2, shortcut: kbd("Mod+Shift+Enter"), disabled: !split, run: () => L.toggleZoom() },
+    { label: "Close pane", icon: PanelTopClose, shortcut: kbd("Mod+W"), disabled: !split, run: () => tabs.closeTab(ws.focus) },
+    { divider: true },
+    { label: "Close tab", icon: X, run: () => L.closeWorkspace(ws.id) },
+    { label: "Close other tabs", disabled: L.workspaces.length < 2, run: () => L.closeOthers(ws.id) },
+    { divider: true },
+    { label: "Keyboard shortcuts…", icon: Keyboard, shortcut: kbd("Mod+/"), run: () => useUi.getState().set({ panel: "shortcuts" }) },
+  ];
 }
 
 function WindowControls() {
@@ -141,6 +170,25 @@ export function TitleBar() {
         >
           <Plus size={16} />
         </motion.button>
+        {/* Split the current tab: the same as Mod+\ / Mod+Shift+\ (or Ctrl+B % / "). */}
+        <motion.div layout className="no-drag flex shrink-0 items-center">
+          <button
+            onClick={() => useLayout.getState().split("row")}
+            className="flex size-[28px] items-center justify-center rounded-[8px] text-ink-3 hover:bg-chrome-active hover:text-ink"
+            title={`Split right (${kbd("Mod+\\")})`}
+            aria-label="Split right"
+          >
+            <Columns2 size={15} />
+          </button>
+          <button
+            onClick={() => useLayout.getState().split("col")}
+            className="flex size-[28px] items-center justify-center rounded-[8px] text-ink-3 hover:bg-chrome-active hover:text-ink"
+            title={`Split down (${kbd("Mod+Shift+\\")})`}
+            aria-label="Split down"
+          >
+            <Rows2 size={15} />
+          </button>
+        </motion.div>
         <div className="h-full min-w-6 flex-1" data-tauri-drag-region />
       </Reorder.Group>
       <div className="flex items-center gap-1 pr-2">

@@ -184,6 +184,7 @@ const PREFIX_KEYS: [string, string][] = [
   ["z", "zoom"],
   ["x", "close pane"],
   ["c", "new tab"],
+  ["?", "all shortcuts"],
 ];
 
 /** Shown while the tmux prefix (Ctrl+B) waits for its command key. */

@@ -33,7 +33,7 @@ export interface ConflictRequest {
   resolve: (c: Conflict | null) => void;
 }
 
-export type Panel = null | "transfers" | "connections" | "settings" | "sync";
+export type Panel = null | "transfers" | "connections" | "settings" | "sync" | "shortcuts";
 
 interface UiState {
   toasts: Toast[];

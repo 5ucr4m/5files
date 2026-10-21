@@ -30,6 +30,9 @@ queue with real progress, and a live monitor in the title bar shows how much dis
 - Moving files between panes: `F5` copies and `F6` moves the selection into the other pane's folder
   (also in the context menu as "Copy to …" / "Move to …"), or drag across
 - Panes spring open from the edge and collapse on close; a light bar glides to the focused pane
+- Right-click a tab for New / Duplicate tab, Split right / down, Zoom, Close pane / tab / other tabs;
+  the split buttons next to `+` in the title bar do the same
+- `⌘/`/`Ctrl+/` (or `Ctrl+B ?`, or the command palette) opens a searchable sheet with every shortcut
 
 **Folder sync** (sidebar → Sync → `+`)
 - Keep two folders in step on any drives (local, S3, Drive, Nextcloud, SFTP, FTP)

@@ -56,6 +56,7 @@ function commands(): Command[] {
     { id: "theme-system", group: "Appearance", title: "Match system theme", run: () => s.set({ theme: "system" }) },
     { id: "transfers", group: "App", title: "Show transfers", run: () => ui.set({ panel: "transfers" }) },
     { id: "settings", group: "App", title: "Settings", hint: kbd("Mod+,"), run: () => ui.set({ panel: "settings" }) },
+    { id: "shortcuts", group: "App", title: "Keyboard shortcuts", hint: kbd("Mod+/"), run: () => ui.set({ panel: "shortcuts" }) },
   ];
 }
 

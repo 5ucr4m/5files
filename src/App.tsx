@@ -5,6 +5,7 @@ import { ConnectionsPanel } from "./components/Connections";
 import { ConfirmDialog, ConflictDialog, ContextMenu, Modal, Toasts } from "./components/Overlays";
 import { PreviewPane, QuickLook } from "./components/Preview";
 import { SettingsPanel } from "./components/Settings";
+import { ShortcutsSheet } from "./components/Shortcuts";
 import { SyncPanel } from "./components/Sync";
 import { Sidebar } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
@@ -115,7 +116,8 @@ function prefixCommand(e: KeyboardEvent): boolean {
   } else if (e.key === "c") {
     const t = activeTab();
     tabs.newTab(t ? { fs: t.fs, path: t.path } : undefined, { afterId: t?.id });
-  } else if (e.key === "n") L.cycle(1);
+  } else if (e.key === "?") useUi.getState().set({ panel: "shortcuts" });
+  else if (e.key === "n") L.cycle(1);
   else if (e.key === "p") L.cycle(-1);
   else if (/^[1-9]$/.test(e.key)) {
     const w = L.workspaces[Number(e.key) - 1];
@@ -168,6 +170,7 @@ function useShortcuts() {
         e.stopPropagation();
       };
       if (mod && k === "k") return stop(), ui.set({ palette: !ui.palette });
+      if (mod && (e.key === "/" || e.code === "Slash")) return stop(), ui.set({ panel: ui.panel === "shortcuts" ? null : "shortcuts" });
       if (ui.palette || ui.confirm || ui.conflict) return;
       if (mod && k === "t") return stop(), tabs.newTab(t ? { fs: t.fs, path: t.path } : undefined, { afterId: t?.id });
       // Closes the focused pane when the tab is split, the tab otherwise.
@@ -312,6 +315,9 @@ export default function App() {
         </Modal>
         <Modal open={panel === "sync"} onClose={() => useUi.getState().set({ panel: null, syncView: null })} width={720}>
           <SyncPanel />
+        </Modal>
+        <Modal open={panel === "shortcuts"} onClose={closePanel} width={820}>
+          <ShortcutsSheet />
         </Modal>
         <Modal open={panel === "settings"} onClose={closePanel} width={520}>
           <SettingsPanel />
