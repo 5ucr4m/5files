@@ -54,11 +54,15 @@ opendal = { version = "0.54", default-features = false, features = [
 ] }
 russh = { version = "0.54", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 urlencoding = "2"
 base64 = "0.22"
 rand = "0.9"
 indexmap = { version = "2", features = ["serde"] }
+# Same versions OpenDAL's FTP service already uses (no new crates in the tree).
+suppaftp = { version = "6", default-features = false, features = ["async-rustls"] }
+futures-rustls = { version = "0.26", default-features = false }
+rustls-native-certs = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
@@ -73,6 +77,8 @@ strip = true
 
 [profile.dev]
 debug = "line-tables-only"
+# Incremental caches grow by GBs; a full re-check of this one crate is only seconds.
+incremental = false
 
 [profile.dev.package."*"]
 opt-level = 2

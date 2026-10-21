@@ -4,7 +4,10 @@
 //! Our paths are absolute POSIX (`/a/b`); OpenDAL wants relative paths and a trailing
 //! slash for directories (`a/b/`).
 
+use super::ftp_empty::{FtpTarget, create_empty};
+use super::spool::{HttpPut, SpoolWriter};
 use super::{BoxReader, BoxWriter, Caps, Entry, Provider, posix};
+use std::sync::Arc;
 use crate::error::{AppError, AppResult};
 use crate::metrics::{self, Channel, CountingReader, CountingWriter};
 use async_trait::async_trait;
@@ -20,11 +23,25 @@ const LIST_ENTRY_WIRE_BYTES: u64 = 256;
 pub struct DalFs {
     op: Operator,
     remote: bool,
+    /// Streaming PUT uploads for services whose OpenDAL writer is one-shot (WebDAV).
+    put: Option<Arc<HttpPut>>,
+    /// Creates zero-byte files on FTP, which OpenDAL's writer can't.
+    ftp_empty: Option<FtpTarget>,
 }
 
 impl DalFs {
     pub fn new(op: Operator, remote: bool) -> Self {
-        Self { op, remote }
+        Self { op, remote, put: None, ftp_empty: None }
+    }
+
+    pub fn with_ftp_empty(mut self, t: FtpTarget) -> Self {
+        self.ftp_empty = Some(t);
+        self
+    }
+
+    pub fn with_put(mut self, put: HttpPut) -> Self {
+        self.put = Some(Arc::new(put));
+        self
     }
 
     fn ch(&self) -> Channel {
@@ -161,6 +178,10 @@ impl Provider for DalFs {
     }
 
     async fn writer(&self, path: &str) -> AppResult<BoxWriter> {
+        if let Some(put) = &self.put {
+            // Bytes are counted by the uploader as they actually leave.
+            return Ok(Box::new(SpoolWriter::new(put.clone(), &posix::normalize(path)).await?));
+        }
         let p = rel_file(path);
         let cap = self.op.info().full_capability();
         let w = if cap.write_can_multi {
@@ -168,7 +189,44 @@ impl Provider for DalFs {
         } else {
             self.op.writer(&p).await?
         };
-        Ok(Box::new(CountingWriter::new(w.into_futures_async_write().compat_write(), self.ch())))
+        let inner = CountingWriter::new(w.into_futures_async_write().compat_write(), self.ch());
+        match &self.ftp_empty {
+            Some(t) => Ok(Box::new(EmptyAware { inner, wrote: false, target: t.clone(), path: posix::normalize(path), pending: None })),
+            None => Ok(Box::new(inner)),
+        }
+    }
+}
+
+/// Delegates to the OpenDAL writer, but if nothing was written, creates the empty file
+/// on shutdown through `create_empty`.
+struct EmptyAware<W> {
+    inner: W,
+    wrote: bool,
+    target: FtpTarget,
+    path: String,
+    pending: Option<std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send>>>,
+}
+
+impl<W: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for EmptyAware<W> {
+    fn poll_write(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> std::task::Poll<std::io::Result<usize>> {
+        if !buf.is_empty() {
+            self.wrote = true;
+        }
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+    fn poll_flush(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        if self.wrote {
+            return std::pin::Pin::new(&mut self.inner).poll_shutdown(cx);
+        }
+        if self.pending.is_none() {
+            let (t, p) = (self.target.clone(), self.path.clone());
+            self.pending = Some(Box::pin(async move { create_empty(&t, &p).await }));
+        }
+        let res = futures::ready!(self.pending.as_mut().unwrap().as_mut().poll(cx));
+        std::task::Poll::Ready(res.map_err(|e| std::io::Error::other(e.to_string())))
     }
 }
 

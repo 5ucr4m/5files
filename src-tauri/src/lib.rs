@@ -14,7 +14,7 @@ use commands::AppState;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
 
 /// How often the transfer list is pushed to the UI while something changes.
@@ -24,7 +24,24 @@ const METRICS_TICK: Duration = Duration::from_millis(500);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    build(tauri::Builder::default())
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+/// Directory for config + secrets fallback. `ATLAS_CONFIG_DIR` overrides it (portable
+/// installs, tests).
+fn config_dir<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<std::path::PathBuf> {
+    match std::env::var_os("ATLAS_CONFIG_DIR") {
+        Some(d) => Ok(d.into()),
+        None => app.path().app_config_dir(),
+    }
+}
+
+/// Everything except the context, so tests can drive the exact same app with the
+/// mock runtime.
+pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
@@ -41,13 +58,14 @@ pub fn run() {
         })
         .setup(|app| {
             let handle = app.handle().clone();
-            let config_dir = app.path().app_config_dir()?;
-            let temp_dir = app.path().app_cache_dir()?.join("open");
+            let config_dir = config_dir(app)?;
+            let temp_dir = config_dir.join("cache").join("open");
             // Old "open remote file" downloads are disposable.
             let _ = std::fs::remove_dir_all(&temp_dir);
 
             let local: vfs::DynProvider = Arc::new(vfs::local::LocalFs);
-            let conns = Arc::new(connections::Connections::load(config_dir));
+            let use_keychain = std::env::var_os("ATLAS_NO_KEYCHAIN").is_none();
+            let conns = Arc::new(connections::Connections::load_with(config_dir, use_keychain));
 
             let dirty = Arc::new(AtomicBool::new(true));
             let resolve: transfer::Resolver = {
@@ -103,6 +121,20 @@ pub fn run() {
                     }
                 });
             }
+            // Safety net: the UI shows the window after its first paint; if that never
+            // happens (e.g. a script error), show it anyway rather than staying invisible.
+            {
+                let handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    if let Some(w) = handle.get_webview_window("main") {
+                        if !w.is_visible().unwrap_or(true) {
+                            eprintln!("[atlas] window was not shown by the UI; showing it");
+                            let _ = w.show();
+                        }
+                    }
+                });
+            }
             // App-scoped disk / network throughput.
             {
                 let handle = handle.clone();
@@ -150,7 +182,6 @@ pub fn run() {
             commands::search_cancel,
             commands::open_item,
             commands::reveal_item,
+            commands::frontend_log,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
 }

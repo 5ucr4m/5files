@@ -3,8 +3,10 @@
 //! where `fs` is `"local"` or a connection id.
 
 pub mod dal;
+pub mod ftp_empty;
 pub mod local;
 pub mod sftp;
+pub mod spool;
 
 use crate::error::{AppError, AppResult};
 use async_trait::async_trait;

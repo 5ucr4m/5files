@@ -418,7 +418,14 @@ pub async fn build(conn: &Connection, secrets: &Opts) -> AppResult<Built> {
             if let Some(p) = opt(s, "password") {
                 b = b.password(p);
             }
-            dal(opendal::Operator::new(b)?.finish())
+            let put = vfs::spool::HttpPut {
+                client: reqwest::Client::new(),
+                base: format!("{endpoint}{}", vfs::posix::normalize(root).trim_end_matches('/')),
+                user: user.map(String::from),
+                pass: opt(s, "password").map(String::from),
+            };
+            let fs = vfs::dal::DalFs::new(opendal::Operator::new(b)?.finish(), true).with_put(put);
+            Ok(Built { provider: Arc::new(fs), learned_host_key: None })
         }
         Kind::Ftp => {
             let scheme = if opt(o, "secure") == Some("true") { "ftps" } else { "ftp" };
@@ -431,7 +438,15 @@ pub async fn build(conn: &Connection, secrets: &Opts) -> AppResult<Built> {
             if let Some(p) = opt(s, "password") {
                 b = b.password(p);
             }
-            dal(opendal::Operator::new(b)?.finish())
+            let empty = vfs::ftp_empty::FtpTarget {
+                addr: format!("{}:{port}", req(o, "host")?),
+                secure: scheme == "ftps",
+                user: opt(o, "username").unwrap_or_default().to_string(),
+                password: opt(s, "password").unwrap_or_default().to_string(),
+                root: vfs::posix::normalize(root),
+            };
+            let fs = vfs::dal::DalFs::new(opendal::Operator::new(b)?.finish(), true).with_ftp_empty(empty);
+            Ok(Built { provider: Arc::new(fs), learned_host_key: None })
         }
         Kind::Sftp => {
             let (fs, learned) = vfs::sftp::SftpFs::connect(o, s).await?;

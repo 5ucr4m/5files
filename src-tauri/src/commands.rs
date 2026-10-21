@@ -13,7 +13,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
@@ -53,7 +53,12 @@ fn root_label(state: &AppState, fs: &str) -> String {
 #[tauri::command]
 pub async fn list_dir(state: S<'_>, fs: String, path: Option<String>) -> AppResult<Listing> {
     let p = state.provider(&fs).await?;
-    let path = path.filter(|p| !p.is_empty()).unwrap_or_else(|| p.root());
+    let path = match path.filter(|p| !p.is_empty()) {
+        Some(p) => p,
+        // A new tab on this computer opens Home, like Finder / Explorer.
+        None if fs == "local" => dirs::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_else(|| p.root()),
+        None => p.root(),
+    };
     let entries = p.list(&path).await?;
     Ok(Listing {
         crumbs: p.crumbs(&path, &root_label(&state, &fs)),
@@ -324,7 +329,7 @@ pub async fn connection_test(state: S<'_>, input: ConnectionInput) -> AppResult<
 }
 
 #[tauri::command]
-pub async fn gdrive_sign_in(app: AppHandle, state: S<'_>, id: String) -> AppResult<()> {
+pub async fn gdrive_sign_in<R: Runtime>(app: AppHandle<R>, state: S<'_>, id: String) -> AppResult<()> {
     let conn = state.conns.get(&id).ok_or_else(|| AppError::NotFound(id.clone()))?;
     if conn.kind != Kind::Gdrive {
         return Err(AppError::Invalid("not a Google Drive connection".into()));
@@ -382,7 +387,7 @@ pub fn search_cancel(state: S<'_>, id: String) {
 /// Opens with the default app. Remote files are downloaded (through the queue, so
 /// progress is visible) to a temp folder first; returns the job id in that case.
 #[tauri::command]
-pub async fn open_item(app: AppHandle, state: S<'_>, fs: String, path: String) -> AppResult<Option<String>> {
+pub async fn open_item<R: Runtime>(app: AppHandle<R>, state: S<'_>, fs: String, path: String) -> AppResult<Option<String>> {
     if fs == "local" {
         app.opener().open_path(&path, None::<&str>).map_err(AppError::other)?;
         return Ok(None);
@@ -400,6 +405,12 @@ pub async fn open_item(app: AppHandle, state: S<'_>, fs: String, path: String) -
 }
 
 #[tauri::command]
-pub fn reveal_item(app: AppHandle, path: String) -> AppResult<()> {
+pub fn reveal_item<R: Runtime>(app: AppHandle<R>, path: String) -> AppResult<()> {
     app.opener().reveal_item_in_dir(&path).map_err(AppError::other)
+}
+
+/// Frontend errors land in the app's stderr/log so they're diagnosable in release builds.
+#[tauri::command]
+pub fn frontend_log(level: String, message: String) {
+    eprintln!("[webview:{level}] {message}");
 }
