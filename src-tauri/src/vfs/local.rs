@@ -9,9 +9,7 @@ use std::time::UNIX_EPOCH;
 pub struct LocalFs;
 
 fn to_ms(t: std::io::Result<std::time::SystemTime>) -> Option<i64> {
-    t.ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
+    t.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64)
 }
 
 fn is_hidden(name: &str, _meta: &Metadata) -> bool {
@@ -42,10 +40,7 @@ pub fn entry_from_path(path: &Path) -> std::io::Result<Entry> {
     let is_symlink = lmeta.file_type().is_symlink();
     // Follow symlinks for type/size, but keep the link itself if it is dangling.
     let meta = if is_symlink { std::fs::metadata(path).unwrap_or(lmeta) } else { lmeta };
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string_lossy().into_owned());
     let mut e = Entry::new(name.clone(), path.to_string_lossy().into_owned(), meta.is_dir());
     e.is_symlink = is_symlink;
     e.size = if meta.is_dir() { 0 } else { meta.len() };
@@ -114,7 +109,19 @@ impl Provider for LocalFs {
 
     async fn remove(&self, path: &str) -> AppResult<()> {
         let meta = tokio::fs::symlink_metadata(path).await?;
-        if meta.is_dir() {
+        if meta.file_type().is_symlink() {
+            // Remove the link itself, never its target. Windows directory symlinks and
+            // junctions must be removed with remove_dir.
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+                if meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+                    return Ok(tokio::fs::remove_dir(path).await?);
+                }
+            }
+            tokio::fs::remove_file(path).await?;
+        } else if meta.is_dir() {
             tokio::fs::remove_dir_all(path).await?;
         } else {
             tokio::fs::remove_file(path).await?;
@@ -123,10 +130,33 @@ impl Provider for LocalFs {
     }
 
     async fn rename(&self, from: &str, to: &str) -> AppResult<()> {
-        if tokio::fs::symlink_metadata(to).await.is_ok() && !same_file_case_insensitive(from, to) {
+        // The target may "exist" only because it is the same file under another case
+        // (a.txt -> A.txt on a case-insensitive disk). Anything else is a real clash.
+        if tokio::fs::symlink_metadata(to).await.is_ok() && !self.same_entry(from, to).await {
             return Err(AppError::AlreadyExists(to.into()));
         }
         Ok(tokio::fs::rename(from, to).await?)
+    }
+
+    fn check_name(&self, name: &str) -> AppResult<()> {
+        super::validate_name(name)
+    }
+
+    async fn same_entry(&self, a: &str, b: &str) -> bool {
+        if a == b {
+            return true;
+        }
+        let (a, b) = (a.to_string(), b.to_string());
+        tokio::task::spawn_blocking(move || same_file::is_same_file(&a, &b).unwrap_or(false)).await.unwrap_or(false)
+    }
+
+    async fn contains(&self, ancestor: &str, path: &str) -> bool {
+        let (a, p) = (ancestor.to_string(), path.to_string());
+        tokio::task::spawn_blocking(move || path_contains(&canonical(&a), &canonical(&p), CASE_INSENSITIVE)).await.unwrap_or(false)
+    }
+
+    fn case_insensitive(&self) -> bool {
+        CASE_INSENSITIVE
     }
 
     async fn copy_file(&self, from: &str, to: &str) -> AppResult<bool> {
@@ -155,10 +185,7 @@ impl Provider for LocalFs {
     }
 
     fn file_name(&self, path: &str) -> String {
-        Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string())
+        Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
     }
 
     fn crumbs(&self, path: &str, _root_label: &str) -> Vec<Crumb> {
@@ -188,9 +215,56 @@ impl Provider for LocalFs {
     }
 }
 
-/// Renaming "a.txt" -> "A.txt" on a case-insensitive FS hits "exists" for itself.
-fn same_file_case_insensitive(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b) && a != b
+/// Default volumes on macOS (APFS/HFS+) and Windows (NTFS) ignore case.
+const CASE_INSENSITIVE: bool = cfg!(any(target_os = "macos", windows));
+
+/// Resolves symlinks/`..`/case where possible; for paths that don't exist yet, resolves
+/// the nearest existing ancestor and re-appends the rest.
+fn canonical(p: &str) -> PathBuf {
+    let path = Path::new(p);
+    let mut tail = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(c) = dunce_canonicalize(cur) {
+            let mut out = c;
+            for t in tail.iter().rev() {
+                out.push(t);
+            }
+            return out;
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name.to_os_string());
+                cur = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// `std::fs::canonicalize` without Windows' `\\?\` prefix (keeps comparisons simple).
+fn dunce_canonicalize(p: &Path) -> std::io::Result<PathBuf> {
+    let c = std::fs::canonicalize(p)?;
+    #[cfg(windows)]
+    {
+        let s = c.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            if !rest.starts_with("UNC\\") {
+                return Ok(PathBuf::from(rest));
+            }
+        }
+    }
+    Ok(c)
+}
+
+/// Component-wise ancestor test (so `/a` doesn't contain `/ab`).
+pub fn path_contains(ancestor: &Path, path: &Path, case_insensitive: bool) -> bool {
+    let eq = |x: &std::ffi::OsStr, y: &std::ffi::OsStr| {
+        if case_insensitive { x.to_string_lossy().to_lowercase() == y.to_string_lossy().to_lowercase() } else { x == y }
+    };
+    let a: Vec<_> = ancestor.components().map(|c| c.as_os_str().to_os_string()).collect();
+    let p: Vec<_> = path.components().map(|c| c.as_os_str().to_os_string()).collect();
+    a.len() <= p.len() && a.iter().zip(&p).all(|(x, y)| eq(x, y))
 }
 
 /// Total size and file count of a tree (for the properties panel).
@@ -263,6 +337,51 @@ mod tests {
         std::fs::write(&b, b"b").unwrap();
         let err = LocalFs.rename(&a.to_string_lossy(), &b.to_string_lossy()).await.unwrap_err();
         assert!(matches!(err, AppError::AlreadyExists(_)));
+    }
+
+    #[tokio::test]
+    async fn identity_handles_trailing_separators_case_and_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("Docs");
+        std::fs::create_dir(&a).unwrap();
+        let fs = LocalFs;
+        let a_s = a.to_string_lossy().into_owned();
+        assert!(fs.contains(&a_s, &format!("{a_s}{}", std::path::MAIN_SEPARATOR)).await);
+        assert!(fs.contains(&a_s, &a.join("x").join("y").to_string_lossy()).await, "not-yet-existing child");
+        assert!(!fs.contains(&a_s, &dir.path().join("Docs2").to_string_lossy()).await);
+        if CASE_INSENSITIVE {
+            assert!(fs.contains(&dir.path().join("docs").to_string_lossy(), &a.join("z").to_string_lossy()).await);
+        }
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("link");
+            std::os::unix::fs::symlink(&a, &link).unwrap();
+            assert!(fs.contains(&a_s, &link.join("inner").to_string_lossy()).await, "through a symlink");
+            assert!(fs.same_entry(&a_s, &link.to_string_lossy()).await);
+            // Removing the link must not touch the target.
+            std::fs::write(a.join("keep.txt"), b"x").unwrap();
+            fs.remove(&link.to_string_lossy()).await.unwrap();
+            assert!(a.join("keep.txt").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn case_only_rename_never_clobbers_another_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let lower = dir.path().join("a.txt");
+        std::fs::write(&lower, b"lower").unwrap();
+        let upper = dir.path().join("A.txt");
+        let fs = LocalFs;
+        if CASE_INSENSITIVE {
+            // Same file under another case: allowed.
+            fs.rename(&lower.to_string_lossy(), &upper.to_string_lossy()).await.unwrap();
+            assert_eq!(std::fs::read(&upper).unwrap(), b"lower");
+        } else {
+            std::fs::write(&upper, b"upper").unwrap();
+            let err = fs.rename(&lower.to_string_lossy(), &upper.to_string_lossy()).await.unwrap_err();
+            assert!(matches!(err, AppError::AlreadyExists(_)));
+            assert_eq!(std::fs::read(&upper).unwrap(), b"upper");
+        }
     }
 
     #[test]

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Atlas",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 480,
+        "center": true,
+        "decorations": false,
+        "dragDropEnabled": false,
+        "visible": false
+      }
+    ]
+  }
+}

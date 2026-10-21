@@ -18,13 +18,18 @@ use tauri_plugin_opener::OpenerExt;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
+/// In-flight uploads of files dropped in from the OS through HTML5 (Windows, where the
+/// webview doesn't expose dropped files' paths): id -> (target path, provider, writer).
+pub type Uploads = tokio::sync::Mutex<HashMap<String, (String, DynProvider, crate::vfs::BoxWriter)>>;
+
 pub struct AppState {
     pub local: DynProvider,
     pub conns: Arc<Connections>,
     pub transfers: Arc<Manager>,
     pub watcher: Watcher,
-    pub searches: Mutex<HashMap<String, CancellationToken>>,
+    pub searches: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub temp_dir: std::path::PathBuf,
+    pub uploads: Uploads,
 }
 
 impl AppState {
@@ -60,14 +65,7 @@ pub async fn list_dir(state: S<'_>, fs: String, path: Option<String>) -> AppResu
         None => p.root(),
     };
     let entries = p.list(&path).await?;
-    Ok(Listing {
-        crumbs: p.crumbs(&path, &root_label(&state, &fs)),
-        parent: p.parent(&path),
-        caps: p.caps(),
-        fs,
-        path,
-        entries,
-    })
+    Ok(Listing { crumbs: p.crumbs(&path, &root_label(&state, &fs)), parent: p.parent(&path), caps: p.caps(), fs, path, entries })
 }
 
 #[tauri::command]
@@ -77,8 +75,8 @@ pub async fn stat(state: S<'_>, fs: String, path: String) -> AppResult<Entry> {
 
 #[tauri::command]
 pub async fn create_dir(state: S<'_>, fs: String, parent: String, name: String) -> AppResult<Entry> {
-    vfs::validate_name(&name)?;
     let p = state.provider(&fs).await?;
+    p.check_name(&name)?;
     let target = p.join(&parent, &name);
     if p.exists(&target).await? {
         return Err(AppError::AlreadyExists(name));
@@ -90,8 +88,8 @@ pub async fn create_dir(state: S<'_>, fs: String, parent: String, name: String) 
 #[tauri::command]
 pub async fn create_file(state: S<'_>, fs: String, parent: String, name: String) -> AppResult<Entry> {
     use tokio::io::AsyncWriteExt;
-    vfs::validate_name(&name)?;
     let p = state.provider(&fs).await?;
+    p.check_name(&name)?;
     let target = p.join(&parent, &name);
     if p.exists(&target).await? {
         return Err(AppError::AlreadyExists(name));
@@ -103,8 +101,8 @@ pub async fn create_file(state: S<'_>, fs: String, parent: String, name: String)
 
 #[tauri::command]
 pub async fn rename(state: S<'_>, fs: String, path: String, new_name: String) -> AppResult<Entry> {
-    vfs::validate_name(&new_name)?;
     let p = state.provider(&fs).await?;
+    p.check_name(&new_name)?;
     let parent = p.parent(&path).ok_or_else(|| AppError::Invalid("cannot rename root".into()))?;
     let target = p.join(&parent, &new_name);
     if target == path {
@@ -131,7 +129,7 @@ pub async fn check_conflicts(state: S<'_>, sources: Vec<Loc>, dest: Loc) -> AppR
         let name = src.file_name(&s.path);
         let target = dst.join(&dest.path, &name);
         // Pasting into the same folder duplicates, which is never a conflict.
-        if s.fs == dest.fs && target == s.path {
+        if s.fs == dest.fs && src.same_entry(&target, &s.path).await {
             continue;
         }
         if dst.exists(&target).await? {
@@ -199,8 +197,14 @@ pub async fn read_text(state: S<'_>, fs: String, path: String, max_bytes: Option
     let max = max_bytes.unwrap_or(256 * 1024).min(4 * 1024 * 1024);
     let (buf, size) = read_head(&p, &path, max).await?;
     let sample = &buf[..buf.len().min(8192)];
-    let binary = sample.contains(&0) || std::str::from_utf8(sample).is_err() && String::from_utf8_lossy(sample).matches('\u{FFFD}').count() > 8;
-    Ok(TextPreview { text: if binary { String::new() } else { String::from_utf8_lossy(&buf).into_owned() }, truncated: size > buf.len() as u64, binary, size })
+    let binary =
+        sample.contains(&0) || std::str::from_utf8(sample).is_err() && String::from_utf8_lossy(sample).matches('\u{FFFD}').count() > 8;
+    Ok(TextPreview {
+        text: if binary { String::new() } else { String::from_utf8_lossy(&buf).into_owned() },
+        truncated: size > buf.len() as u64,
+        binary,
+        size,
+    })
 }
 
 /// For remote previews (images, PDFs…): returns a data: URL.
@@ -235,7 +239,8 @@ pub async fn dir_size(state: S<'_>, fs: String, path: String) -> AppResult<DirSi
     let mut stack = vec![path];
     while let Some(d) = stack.pop() {
         for e in p.list(&d).await? {
-            if e.is_dir {
+            // Don't follow folder links: a `self -> .` link would loop forever.
+            if e.is_dir && !e.is_symlink {
                 dirs += 1;
                 stack.push(e.path);
             } else {
@@ -267,11 +272,7 @@ pub struct Platform {
 
 #[tauri::command]
 pub fn platform() -> Platform {
-    Platform {
-        os: std::env::consts::OS,
-        sep: std::path::MAIN_SEPARATOR,
-        home: dirs::home_dir().map(|h| h.to_string_lossy().into_owned()),
-    }
+    Platform { os: std::env::consts::OS, sep: std::path::MAIN_SEPARATOR, home: dirs::home_dir().map(|h| h.to_string_lossy().into_owned()) }
 }
 
 // ----------------------------- connections -----------------------------
@@ -325,9 +326,9 @@ pub async fn connection_test(state: S<'_>, input: ConnectionInput) -> AppResult<
         let built = connections::build(&conn, &secrets).await?;
         built.provider.list(&built.provider.root()).await.map(|e| e.len())
     };
-    tokio::time::timeout(connections::CONNECT_TIMEOUT, probe)
-        .await
-        .map_err(|_| AppError::Connection(format!("no answer after {}s — check the host and port", connections::CONNECT_TIMEOUT.as_secs())))?
+    tokio::time::timeout(connections::CONNECT_TIMEOUT, probe).await.map_err(|_| {
+        AppError::Connection(format!("no answer after {}s — check the host and port", connections::CONNECT_TIMEOUT.as_secs()))
+    })?
 }
 
 #[tauri::command]
@@ -341,10 +342,9 @@ pub async fn gdrive_sign_in<R: Runtime>(app: AppHandle<R>, state: S<'_>, id: Str
     if client_id.is_empty() || client_secret.is_empty() {
         return Err(AppError::Invalid("Client ID and Client Secret are required".into()));
     }
-    let token = crate::oauth::google_sign_in(&client_id, &client_secret, |url| {
-        app.opener().open_url(url, None::<&str>).map_err(AppError::other)
-    })
-    .await?;
+    let token =
+        crate::oauth::google_sign_in(&client_id, &client_secret, |url| app.opener().open_url(url, None::<&str>).map_err(AppError::other))
+            .await?;
     state.conns.set_secret(&id, "refreshToken", token)?;
     state.conns.disconnect(&id);
     Ok(())
@@ -370,11 +370,14 @@ pub async fn search_start(
     let id = uuid::Uuid::new_v4().to_string();
     let token = CancellationToken::new();
     state.searches.lock().insert(id.clone(), token.clone());
+    let searches = state.searches.clone();
+    let sid = id.clone();
     tauri::async_runtime::spawn(async move {
         search::run(p, root, query, include_hidden, token, move |e| {
             let _ = on_event.send(e);
         })
         .await;
+        searches.lock().remove(&sid);
     });
     Ok(id)
 }
@@ -421,4 +424,49 @@ pub fn frontend_log(level: String, message: String) {
 #[tauri::command]
 pub fn e2e_dir() -> Option<String> {
     std::env::var("ATLAS_E2E").ok().filter(|d| !d.is_empty())
+}
+
+/// Starts an upload into `dir`; the name is validated and made unique. Returns an id.
+#[tauri::command]
+pub async fn upload_begin(state: S<'_>, fs: String, dir: String, name: String) -> AppResult<String> {
+    let p = state.provider(&fs).await?;
+    p.check_name(&name)?;
+    let target = vfs::unique_name(&*p, &dir, &name, false).await?;
+    let writer = p.writer(&target).await?;
+    let id = uuid::Uuid::new_v4().to_string();
+    state.uploads.lock().await.insert(id.clone(), (target, p, writer));
+    Ok(id)
+}
+
+/// Appends a raw chunk (request body) to the upload named by the `x-upload-id` header.
+#[tauri::command]
+pub async fn upload_chunk(state: S<'_>, request: tauri::ipc::Request<'_>) -> AppResult<()> {
+    use tokio::io::AsyncWriteExt;
+    let id =
+        request.headers().get("x-upload-id").and_then(|v| v.to_str().ok()).ok_or_else(|| AppError::Invalid("missing upload id".into()))?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError::Invalid("expected a binary body".into()));
+    };
+    let mut uploads = state.uploads.lock().await;
+    let (_, _, w) = uploads.get_mut(id).ok_or_else(|| AppError::NotFound(format!("upload {id}")))?;
+    w.write_all(bytes).await?;
+    Ok(())
+}
+
+/// Finishes (or with `cancel`, aborts and removes) an upload. Returns the created path.
+#[tauri::command]
+pub async fn upload_end(state: S<'_>, id: String, cancel: bool) -> AppResult<String> {
+    use tokio::io::AsyncWriteExt;
+    let (path, p, mut w) = state.uploads.lock().await.remove(&id).ok_or_else(|| AppError::NotFound(format!("upload {id}")))?;
+    if cancel {
+        drop(w);
+        let _ = p.remove(&path).await;
+        return Err(AppError::Cancelled);
+    }
+    if let Err(e) = w.shutdown().await {
+        drop(w);
+        let _ = p.remove(&path).await;
+        return Err(e.into());
+    }
+    Ok(path)
 }

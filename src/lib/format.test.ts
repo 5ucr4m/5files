@@ -72,3 +72,17 @@ describe("names", () => {
     expect(stemRange("my.folder", true)).toEqual([0, 9]);
   });
 });
+
+import { volumeFor } from "../components/StatusBar";
+
+describe("volumeFor", () => {
+  const vols = [{ mount: "/" }, { mount: "/mnt/data" }, { mount: "C:\\" }, { mount: "D:\\" }];
+  it("needs a separator boundary", () => {
+    expect(volumeFor(vols, "/mnt/data2/x", "linux")?.mount).toBe("/");
+    expect(volumeFor(vols, "/mnt/data/x", "linux")?.mount).toBe("/mnt/data");
+    expect(volumeFor(vols, "/mnt/data", "linux")?.mount).toBe("/mnt/data");
+  });
+  it("matches Windows drives case-insensitively", () => {
+    expect(volumeFor(vols, "d:\\Projects", "windows")?.mount).toBe("D:\\");
+  });
+});

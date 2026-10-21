@@ -25,8 +25,26 @@ pub struct Place {
 }
 
 const PSEUDO_FS: &[&str] = &[
-    "tmpfs", "devtmpfs", "overlay", "squashfs", "proc", "sysfs", "efivarfs", "devfs", "autofs", "ramfs", "cgroup",
-    "cgroup2", "fuse.portal", "nullfs", "bpf", "tracefs", "debugfs", "securityfs", "pstore", "configfs",
+    "tmpfs",
+    "devtmpfs",
+    "overlay",
+    "squashfs",
+    "proc",
+    "sysfs",
+    "efivarfs",
+    "devfs",
+    "autofs",
+    "ramfs",
+    "cgroup",
+    "cgroup2",
+    "fuse.portal",
+    "nullfs",
+    "bpf",
+    "tracefs",
+    "debugfs",
+    "securityfs",
+    "pstore",
+    "configfs",
 ];
 
 /// Decides whether a mount point is something a user would consider "a drive".
@@ -66,10 +84,7 @@ pub fn list() -> Vec<Volume> {
             } else if mount == "/" {
                 "System".into()
             } else {
-                std::path::Path::new(&mount)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| mount.clone())
+                std::path::Path::new(&mount).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| mount.clone())
             };
             Some(Volume {
                 name,

@@ -112,40 +112,92 @@ pub struct SecretStore {
     use_keychain: bool,
 }
 
+/// Windows Credential Manager caps a secret at 2560 bytes (UTF-16), which a pasted RSA
+/// key exceeds; the JSON is therefore split across numbered entries everywhere.
+const CHUNK_CHARS: usize = 1000;
+
+/// Keychain backends may block on D-Bus (Linux Secret Service drives its own runtime and
+/// panics inside a Tokio worker), so every call runs on a short-lived plain thread.
+fn off_runtime<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|s| s.spawn(f).join().expect("keychain thread panicked"))
+}
+
 impl SecretStore {
     pub fn new(dir: &std::path::Path, use_keychain: bool) -> Self {
         Self { fallback_file: dir.join("secrets.json"), use_keychain }
     }
 
-    fn entry(&self, id: &str) -> Option<keyring::Entry> {
-        if !self.use_keychain {
-            return None;
+    fn entry(name: &str) -> Option<keyring::Entry> {
+        keyring::Entry::new(KEYRING_SERVICE, name).ok()
+    }
+
+    fn keychain_write(id: &str, json: &str) -> bool {
+        let chars: Vec<char> = json.chars().collect();
+        let chunks: Vec<String> = chars.chunks(CHUNK_CHARS).map(|c| c.iter().collect()).collect();
+        let Some(head) = Self::entry(id) else { return false };
+        for (i, c) in chunks.iter().enumerate() {
+            match Self::entry(&format!("{id}#{i}")) {
+                Some(e) if e.set_password(c).is_ok() => {}
+                _ => return false,
+            }
         }
-        keyring::Entry::new(KEYRING_SERVICE, id).ok()
+        head.set_password(&format!("chunks:{}", chunks.len())).is_ok()
+    }
+
+    fn keychain_read(id: &str) -> Option<String> {
+        let head = Self::entry(id)?.get_password().ok()?;
+        let n: usize = head.strip_prefix("chunks:")?.parse().ok()?;
+        let mut out = String::new();
+        for i in 0..n {
+            out.push_str(&Self::entry(&format!("{id}#{i}"))?.get_password().ok()?);
+        }
+        Some(out)
+    }
+
+    fn keychain_delete(id: &str) {
+        let n = Self::entry(id)
+            .and_then(|e| e.get_password().ok())
+            .and_then(|h| h.strip_prefix("chunks:").and_then(|n| n.parse::<usize>().ok()))
+            .unwrap_or(0);
+        for i in 0..n {
+            if let Some(e) = Self::entry(&format!("{id}#{i}")) {
+                let _ = e.delete_credential();
+            }
+        }
+        if let Some(e) = Self::entry(id) {
+            let _ = e.delete_credential();
+        }
     }
 
     fn read_fallback(&self) -> HashMap<String, Opts> {
-        std::fs::read(&self.fallback_file)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+        std::fs::read(&self.fallback_file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
 
     fn write_fallback(&self, all: &HashMap<String, Opts>) -> AppResult<()> {
         let data = serde_json::to_vec_pretty(all)?;
-        std::fs::write(&self.fallback_file, data)?;
-        #[cfg(unix)]
+        let tmp = self.fallback_file.with_extension("json.tmp");
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&self.fallback_file, std::fs::Permissions::from_mode(0o600));
+            use std::io::Write;
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create(true).truncate(true);
+            // Owner-only from the first byte (no world-readable window).
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            let mut f = opts.open(&tmp)?;
+            f.write_all(&data)?;
+            f.sync_all()?;
         }
+        std::fs::rename(&tmp, &self.fallback_file)?;
         Ok(())
     }
 
     /// Returns `true` if stored in the OS keychain, `false` if in the fallback file.
     pub fn save(&self, id: &str, secrets: &Opts) -> AppResult<bool> {
         let json = serde_json::to_string(secrets)?;
-        let keychain_ok = self.entry(id).map(|e| e.set_password(&json).is_ok()).unwrap_or(false);
+        let keychain_ok = self.use_keychain && off_runtime(|| Self::keychain_write(id, &json));
         let mut fb = self.read_fallback();
         if keychain_ok {
             if fb.remove(id).is_some() {
@@ -160,17 +212,18 @@ impl SecretStore {
     }
 
     pub fn load(&self, id: &str) -> Opts {
-        if let Some(Ok(json)) = self.entry(id).map(|e| e.get_password()) {
-            if let Ok(v) = serde_json::from_str(&json) {
-                return v;
-            }
+        if self.use_keychain
+            && let Some(json) = off_runtime(|| Self::keychain_read(id))
+            && let Ok(v) = serde_json::from_str(&json)
+        {
+            return v;
         }
         self.read_fallback().remove(id).unwrap_or_default()
     }
 
     pub fn delete(&self, id: &str) {
-        if let Some(e) = self.entry(id) {
-            let _ = e.delete_credential();
+        if self.use_keychain {
+            off_runtime(|| Self::keychain_delete(id));
         }
         let mut fb = self.read_fallback();
         if fb.remove(id).is_some() {
@@ -189,7 +242,9 @@ pub struct Connections {
     list: RwLock<Vec<Connection>>,
     mounted: RwLock<HashMap<String, DynProvider>>,
     state: RwLock<HashMap<String, (Status, Option<String>)>>,
-    connect_lock: tokio::sync::Mutex<()>,
+    /// One lock per connection: concurrent first uses share a single connect, while an
+    /// unreachable host doesn't hold up the others.
+    connect_locks: parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Connections {
@@ -200,17 +255,14 @@ impl Connections {
     pub fn load_with(dir: PathBuf, use_keychain: bool) -> Self {
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("connections.json");
-        let list = std::fs::read(&file)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let list = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         Self {
             secrets: SecretStore::new(&dir, use_keychain),
             file,
             list: RwLock::new(list),
             mounted: RwLock::new(HashMap::new()),
             state: RwLock::new(HashMap::new()),
-            connect_lock: tokio::sync::Mutex::new(()),
+            connect_locks: Default::default(),
         }
     }
 
@@ -250,9 +302,21 @@ impl Connections {
         secrets.extend(new_secrets);
         let in_keychain = self.secrets.save(&id, &secrets)?;
         let existing = self.get(&id);
-        // A trusted SSH host key belongs to a host:port; pointing the connection
-        // elsewhere must not carry it over (it would wrongly report a mismatch).
+        // Trusted SSH host key: it is learned by the backend after the form was opened,
+        // so an absent field means "keep" (an explicit empty value clears it), and it is
+        // always dropped when the connection now points at another host:port.
         if let Some(prev) = &existing {
+            match opts.get("hostKey").map(|v| v.trim().to_string()) {
+                None => {
+                    if let Some(k) = prev.options.get("hostKey") {
+                        opts.insert("hostKey".into(), k.clone());
+                    }
+                }
+                Some(v) if v.is_empty() => {
+                    opts.remove("hostKey");
+                }
+                Some(_) => {}
+            }
             let moved = ["host", "port"].iter().any(|k| prev.options.get(*k) != opts.get(*k));
             if moved {
                 opts.remove("hostKey");
@@ -316,7 +380,8 @@ impl Connections {
         if let Some(p) = self.mounted.read().get(id).cloned() {
             return Ok(p);
         }
-        let _guard = self.connect_lock.lock().await;
+        let lock = self.connect_locks.lock().entry(id.to_string()).or_default().clone();
+        let _guard = lock.lock().await;
         if let Some(p) = self.mounted.read().get(id).cloned() {
             return Ok(p);
         }
@@ -377,10 +442,8 @@ pub async fn build(conn: &Connection, secrets: &Opts) -> AppResult<Built> {
     };
     match conn.kind {
         Kind::S3 => {
-            let mut b = opendal::services::S3::default()
-                .bucket(req(o, "bucket")?)
-                .root(root)
-                .region(opt(o, "region").unwrap_or("us-east-1"));
+            let mut b =
+                opendal::services::S3::default().bucket(req(o, "bucket")?).root(root).region(opt(o, "region").unwrap_or("us-east-1"));
             if let Some(ep) = opt(o, "endpoint") {
                 b = b.endpoint(ep);
             }
@@ -518,7 +581,15 @@ mod tests {
         o.insert("hostKey".into(), "SHA256:abc".into());
         let c = store.upsert(ConnectionInput { id: None, name: "s".into(), kind: Kind::Sftp, options: o.clone(), color: None }).unwrap();
         // Same host: kept.
-        let c = store.upsert(ConnectionInput { id: Some(c.id), name: "s".into(), kind: Kind::Sftp, options: o.clone(), color: None }).unwrap();
+        let c =
+            store.upsert(ConnectionInput { id: Some(c.id), name: "s".into(), kind: Kind::Sftp, options: o.clone(), color: None }).unwrap();
+        assert_eq!(c.options.get("hostKey").map(String::as_str), Some("SHA256:abc"));
+        // Form opened before the key was learned (field absent): kept.
+        let mut stale = o.clone();
+        stale.remove("hostKey");
+        let c = store
+            .upsert(ConnectionInput { id: Some(c.id), name: "renamed".into(), kind: Kind::Sftp, options: stale, color: None })
+            .unwrap();
         assert_eq!(c.options.get("hostKey").map(String::as_str), Some("SHA256:abc"));
         // New host: dropped.
         o.insert("host".into(), "b.example.com".into());
@@ -526,14 +597,28 @@ mod tests {
         assert!(c.options.get("hostKey").is_none());
     }
 
+    /// Touches the real OS keychain: `cargo test keychain -- --ignored`.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn keychain_roundtrip_with_large_secret_inside_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SecretStore::new(dir.path(), true);
+        let id = format!("atlas-test-{}", uuid::Uuid::new_v4());
+        let mut secrets = Opts::new();
+        secrets.insert("privateKey".into(), "k".repeat(3300));
+        secrets.insert("passphrase".into(), "pässwörd".into());
+        assert!(store.save(&id, &secrets).unwrap(), "should land in the keychain, not the fallback file");
+        assert_eq!(store.load(&id), secrets);
+        assert!(!dir.path().join("secrets.json").exists());
+        store.delete(&id);
+        assert!(store.load(&id).is_empty());
+    }
+
     #[test]
     fn nextcloud_url_building() {
         assert_eq!(nextcloud_endpoint("cloud.x.com/", "ana"), "https://cloud.x.com/remote.php/dav/files/ana");
         assert_eq!(nextcloud_endpoint("http://h:8080", "a b"), "http://h:8080/remote.php/dav/files/a%20b");
-        assert_eq!(
-            nextcloud_endpoint("https://h/remote.php/dav/files/x", "ignored"),
-            "https://h/remote.php/dav/files/x"
-        );
+        assert_eq!(nextcloud_endpoint("https://h/remote.php/dav/files/x", "ignored"), "https://h/remote.php/dav/files/x");
     }
 
     #[test]
@@ -543,9 +628,7 @@ mod tests {
         let mut options = Opts::new();
         options.insert("host".into(), "ftp.example.com".into());
         options.insert("password".into(), "s3cr3t-value".into());
-        let c = store
-            .upsert(ConnectionInput { id: None, name: "My FTP".into(), kind: Kind::Ftp, options, color: None })
-            .unwrap();
+        let c = store.upsert(ConnectionInput { id: None, name: "My FTP".into(), kind: Kind::Ftp, options, color: None }).unwrap();
         let on_disk = std::fs::read_to_string(dir.path().join("connections.json")).unwrap();
         assert!(on_disk.contains("ftp.example.com"));
         assert!(!on_disk.contains("s3cr3t-value"));

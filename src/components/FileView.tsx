@@ -2,16 +2,16 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle, ArrowDown, ArrowUp, FolderOpen, RotateCw, SearchX } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { canDrop, dropEffect, endDrag, handleDrop, isInternalDrag, startDrag } from "../lib/dnd";
+import { canDrop, droppedFiles, dropEffect, endDrag, handleDrop, isExternalFileDrag, isInternalDrag, startDrag } from "../lib/dnd";
 import { formatBytes, formatDate, kindLabel, sortEntries, stemRange, type SortKey } from "../lib/format";
 import { backgroundMenu, itemMenu } from "../lib/menus";
-import { commitRename, copySelection, deleteSelection, newFolder, openEntry, paste, selectedEntries, transfer } from "../lib/ops";
+import { commitRename, copySelection, deleteSelection, newFolder, openEntry, paste, selectedEntries, transfer, uploadDropped } from "../lib/ops";
 import { isMac, isMod } from "../lib/platform";
 import { clickSelect, hitGrid, hitList, jumpTo, moveFocus, normRect, typeAhead } from "../lib/selection";
 import type { Entry } from "../lib/types";
 import { useSettings } from "../store/settings";
 import { useTabs, type Tab } from "../store/tabs";
-import { useUi } from "../store/ui";
+import { toast, useUi } from "../store/ui";
 import { FileIcon } from "./FileIcon";
 
 const HEADER_H = 30;
@@ -519,6 +519,12 @@ export function FileView({ tab }: { tab: Tab }) {
     ? {}
     : {
         onDragOver: (e: DragEvent) => {
+          if (isExternalFileDrag(e)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setOver(true);
+            return;
+          }
           if (!isInternalDrag(e) || !canDrop(here)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = dropEffect(e, here);
@@ -529,6 +535,13 @@ export function FileView({ tab }: { tab: Tab }) {
         },
         onDrop: (e: DragEvent) => {
           setOver(false);
+          if (isExternalFileDrag(e)) {
+            e.preventDefault();
+            const { files, folders } = droppedFiles(e);
+            if (folders) toast({ tone: "info", title: "Folders can't be dropped here yet", body: "Copy them with the clipboard instead." });
+            void uploadDropped(here, files);
+            return;
+          }
           void handleDrop(e, here);
         },
       };

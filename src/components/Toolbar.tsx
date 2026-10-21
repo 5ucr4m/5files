@@ -95,7 +95,9 @@ function PathBar({ tab }: { tab: Tab }) {
       const e = await api().stat(tab.fs, p);
       if (e.isDir) await useTabs.getState().navigate(tab.id, { fs: tab.fs, path: e.path });
       else {
-        const parent = e.path.replace(/[\\/][^\\/]+$/, "") || "/";
+        let parent = e.path.replace(/[\\/][^\\/]+$/, "") || "/";
+        // "D:\\notes.txt" -> "D:\\" (a bare "D:" would mean "current dir on D:").
+        if (/^[A-Za-z]:$/.test(parent)) parent += "\\";
         await useTabs.getState().navigate(tab.id, { fs: tab.fs, path: parent }, { select: e.path });
       }
     } catch (err) {
@@ -138,6 +140,8 @@ function PathBar({ tab }: { tab: Tab }) {
   );
 }
 
+let searchRuns = 0;
+
 function SearchBox({ tab }: { tab: Tab }) {
   const input = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(tab.filter || tab.search?.query || "");
@@ -150,7 +154,8 @@ function SearchBox({ tab }: { tab: Tab }) {
   }, []);
 
   const stopSearch = () => {
-    if (tab.search?.id) void api().cancelSearch(tab.search.id);
+    const t = useTabs.getState().tabs.find((x) => x.id === tab.id);
+    if (t?.search?.id && t.search.running) void api().cancelSearch(t.search.id);
   };
   const clear = () => {
     stopSearch();
@@ -161,18 +166,24 @@ function SearchBox({ tab }: { tab: Tab }) {
     const query = value.trim();
     if (!query) return clear();
     stopSearch();
+    const run = ++searchRuns;
+    // Only the run that is still current may write (late events from a cancelled or
+    // replaced search are dropped, even for the same query).
     const patch = (fn: (s: NonNullable<Tab["search"]>) => Partial<NonNullable<Tab["search"]>>) => {
       const t = useTabs.getState().tabs.find((x) => x.id === tab.id);
-      if (t?.search && t.search.query === query) useTabs.getState().patch(tab.id, { search: { ...t.search, ...fn(t.search) } });
+      if (t?.search && t.search.run === run) useTabs.getState().patch(tab.id, { search: { ...t.search, ...fn(t.search) } });
     };
-    useTabs.getState().patch(tab.id, { filter: "", selection: new Set(), search: { id: null, query, results: [], running: true, scanned: 0, truncated: false } });
+    useTabs.getState().patch(tab.id, { filter: "", selection: new Set(), search: { run, id: null, query, results: [], running: true, scanned: 0, truncated: false } });
     try {
       const id = await api().search(tab.fs, tab.path, query, showHidden, (ev) => {
         if (ev.type === "results") patch((s) => ({ results: [...s.results, ...ev.entries] }));
         else if (ev.type === "progress") patch(() => ({ scanned: ev.scanned }));
         else patch(() => ({ running: false, truncated: ev.truncated }));
       });
-      patch(() => ({ id }));
+      const t = useTabs.getState().tabs.find((x) => x.id === tab.id);
+      // Superseded while the backend was starting it: stop it right away.
+      if (t?.search?.run !== run) void api().cancelSearch(id);
+      else patch(() => ({ id }));
     } catch (e) {
       toast({ tone: "error", title: "Search failed", body: errorMessage(e) });
       patch(() => ({ running: false }));

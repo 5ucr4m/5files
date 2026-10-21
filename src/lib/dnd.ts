@@ -57,3 +57,22 @@ export async function handleDrop(e: DragEvent, dest: Loc) {
 function canDropItems(items: Loc[], dest: Loc) {
   return !items.some((s) => s.fs === dest.fs && (s.path === dest.path || dest.path.startsWith(s.path + "/") || dest.path.startsWith(s.path + "\\")));
 }
+
+/** A drag carrying files from outside the app (only seen as HTML5 drag on Windows). */
+export const isExternalFileDrag = (e: DragEvent) => !isInternalDrag(e) && e.dataTransfer.types.includes("Files");
+
+/** Real files from an HTML5 drop (folders are left out: the File API can't read them). */
+export function droppedFiles(e: DragEvent): { files: File[]; folders: number } {
+  const files: File[] = [];
+  let folders = 0;
+  const items = Array.from(e.dataTransfer.items ?? []);
+  items.forEach((it, i) => {
+    const entry = (it as DataTransferItem & { webkitGetAsEntry?: () => { isDirectory: boolean } | null }).webkitGetAsEntry?.();
+    if (entry?.isDirectory) folders++;
+    else {
+      const f = it.getAsFile() ?? e.dataTransfer.files[i];
+      if (f) files.push(f);
+    }
+  });
+  return { files, folders };
+}

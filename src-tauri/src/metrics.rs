@@ -21,12 +21,8 @@ pub struct Counters {
     pub net_tx: AtomicU64,
 }
 
-pub static COUNTERS: Counters = Counters {
-    disk_read: AtomicU64::new(0),
-    disk_write: AtomicU64::new(0),
-    net_rx: AtomicU64::new(0),
-    net_tx: AtomicU64::new(0),
-};
+pub static COUNTERS: Counters =
+    Counters { disk_read: AtomicU64::new(0), disk_write: AtomicU64::new(0), net_rx: AtomicU64::new(0), net_tx: AtomicU64::new(0) };
 
 /// Which pair of counters an I/O stream should be charged to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,10 +193,7 @@ mod tests {
         let mut s = RateSampler::new(4);
         let t0 = s.last_at;
         s.last = Totals::default();
-        let snap = s.sample_with(
-            Totals { disk_read: 1000, disk_write: 500, net_rx: 0, net_tx: 2000 },
-            t0 + Duration::from_millis(500),
-        );
+        let snap = s.sample_with(Totals { disk_read: 1000, disk_write: 500, net_rx: 0, net_tx: 2000 }, t0 + Duration::from_millis(500));
         assert!((snap.rates.disk_read - 2000.0).abs() < 1.0);
         assert!((snap.rates.disk_write - 1000.0).abs() < 1.0);
         assert!((snap.rates.net_tx - 4000.0).abs() < 1.0);

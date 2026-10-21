@@ -151,13 +151,7 @@ fn now_ms() -> i64 {
 
 impl Manager {
     pub fn new(concurrency: usize, resolve: Resolver, notify: Notify, on_done: OnDone) -> Arc<Self> {
-        Arc::new(Self {
-            jobs: Mutex::new(VecDeque::new()),
-            slots: Arc::new(Semaphore::new(concurrency.max(1))),
-            resolve,
-            notify,
-            on_done,
-        })
+        Arc::new(Self { jobs: Mutex::new(VecDeque::new()), slots: Arc::new(Semaphore::new(concurrency.max(1))), resolve, notify, on_done })
     }
 
     pub fn snapshots(&self) -> Vec<JobSnapshot> {
@@ -169,12 +163,7 @@ impl Manager {
     }
 
     fn find(&self, id: &str) -> AppResult<Arc<Job>> {
-        self.jobs
-            .lock()
-            .iter()
-            .find(|j| j.snap.lock().id == id)
-            .cloned()
-            .ok_or_else(|| AppError::NotFound(format!("job {id}")))
+        self.jobs.lock().iter().find(|j| j.snap.lock().id == id).cloned().ok_or_else(|| AppError::NotFound(format!("job {id}")))
     }
 
     pub fn enqueue(self: &Arc<Self>, req: JobRequest) -> AppResult<String> {
@@ -209,13 +198,8 @@ impl Manager {
             outputs: vec![],
         };
         let (pause, _) = watch::channel(false);
-        let job = Arc::new(Job {
-            req,
-            snap: Mutex::new(snap),
-            cancel: CancellationToken::new(),
-            pause,
-            speed: Mutex::new(SpeedMeter::new()),
-        });
+        let job =
+            Arc::new(Job { req, snap: Mutex::new(snap), cancel: CancellationToken::new(), pause, speed: Mutex::new(SpeedMeter::new()) });
         {
             let mut jobs = self.jobs.lock();
             jobs.push_back(job.clone());
@@ -352,14 +336,20 @@ impl Manager {
             check(job).await?;
             let src_entry = src.stat(&item.path).await?;
             let name = src.file_name(&item.path);
-            if same_fs && is_inside(&*src, &item.path, &dest_loc.path) {
-                return Err(AppError::Invalid(format!("cannot {} \"{name}\" into itself", verb(job.req.kind))));
+            dst.check_name(&name)?;
+            let (item_bytes, item_files) =
+                (plan.sizes.get(&item.path).copied().unwrap_or(0), plan.counts.get(&item.path).copied().unwrap_or(1));
+            // Identity checks go through the provider (canonical paths, real file identity),
+            // never plain string comparison: case, trailing separators and symlinks differ.
+            if same_fs && src_entry.is_dir && src.contains(&item.path, &dest_loc.path).await {
+                return Err(AppError::Invalid(format!("can't {} “{name}” into itself", verb(job.req.kind))));
             }
             let mut target = dst.join(&dest_loc.path, &name);
-            if same_fs && target == item.path {
+            let mut replace = false;
+            if same_fs && src.same_entry(&target, &item.path).await {
                 if job.req.kind == JobKind::Move {
                     // Moving onto itself is a no-op.
-                    self.add_done(job, plan.sizes.get(&item.path).copied().unwrap_or(0), 1);
+                    self.add_done(job, item_bytes, item_files);
                     continue;
                 }
                 // Duplicate in place ("copy" in the same folder): always keep both.
@@ -367,42 +357,55 @@ impl Manager {
             } else if dst.exists(&target).await? {
                 match job.req.conflict {
                     Conflict::Skip => {
-                        let (bytes, files) = (plan.sizes.get(&item.path).copied().unwrap_or(0), plan.counts.get(&item.path).copied().unwrap_or(1));
-                        self.set(job, |s| s.skipped += files);
-                        self.add_done(job, bytes, files);
+                        self.set(job, |s| s.skipped += item_files);
+                        self.add_done(job, item_bytes, item_files);
                         continue;
                     }
                     Conflict::KeepBoth => {
                         target = vfs::unique_name(&*dst, &dest_loc.path, &name, src_entry.is_dir).await?;
                     }
                     Conflict::Overwrite => {
-                        // Merge directories; replace files.
+                        // Never replace something that contains what we're transferring.
+                        if same_fs && dst.contains(&target, &item.path).await {
+                            return Err(AppError::Invalid(format!(
+                                "can't replace “{name}”: it contains the item being {}",
+                                if job.req.kind == JobKind::Move { "moved" } else { "copied" }
+                            )));
+                        }
                         let existing = dst.stat(&target).await?;
-                        if !existing.is_dir || !src_entry.is_dir {
-                            dst.remove(&target).await?;
+                        match (existing.is_dir, src_entry.is_dir) {
+                            (true, true) => {}                // merge folders
+                            (false, false) => replace = true, // atomic replace after the copy
+                            _ => dst.remove(&target).await?,  // file <-> folder: type changes
                         }
                     }
                 }
             }
 
             // Fast path: rename within the same file system.
-            if job.req.kind == JobKind::Move && same_fs && src.caps().rename && !dst.exists(&target).await? {
-                match src.rename(&item.path, &target).await {
-                    Ok(()) => {
-                        self.add_done(job, plan.sizes.get(&item.path).copied().unwrap_or(0), plan.counts.get(&item.path).copied().unwrap_or(1));
-                        job.snap.lock().outputs.push(target);
-                        continue;
-                    }
-                    // Cross-device move or unsupported: fall back to copy + delete.
-                    Err(_) => {}
+            if job.req.kind == JobKind::Move && same_fs && src.caps().rename && (!dst.exists(&target).await? || replace) {
+                if replace {
+                    // Source is complete and stays intact until the rename succeeds.
+                    dst.remove(&target).await?;
                 }
+                if src.rename(&item.path, &target).await.is_ok() {
+                    self.add_done(job, item_bytes, item_files);
+                    job.snap.lock().outputs.push(target);
+                    continue;
+                }
+                // Cross-device move or unsupported: fall back to copy + delete.
             }
 
-            self.copy_tree(job, &src, &dst, &item.path, &target, src_entry.is_dir, same_fs).await?;
+            let skipped_before = job.snap.lock().skipped;
+            self.copy_tree(job, &src, &dst, &item.path, &target, src_entry.is_dir, same_fs, replace).await?;
             job.snap.lock().outputs.push(target);
             if job.req.kind == JobKind::Move {
                 check(job).await?;
-                src.remove(&item.path).await?;
+                // Children skipped inside this tree (bad names, folder links, conflicts)
+                // exist only at the source: keep the source in that case.
+                if job.snap.lock().skipped == skipped_before {
+                    src.remove(&item.path).await?;
+                }
             }
         }
         Ok(())
@@ -444,6 +447,7 @@ impl Manager {
         Ok(plan)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn copy_tree(
         &self,
         job: &Arc<Job>,
@@ -453,74 +457,147 @@ impl Manager {
         to: &str,
         is_dir: bool,
         same_fs: bool,
+        replace: bool,
     ) -> AppResult<()> {
         if !is_dir {
-            return self.copy_file(job, src, dst, from, to, same_fs).await;
+            return self.copy_file(job, src, dst, from, to, same_fs, replace).await;
         }
         let mut stack = vec![(from.to_string(), to.to_string())];
         while let Some((sdir, ddir)) = stack.pop() {
             check(job).await?;
+            // Existing destination folder = merge: every child may clash.
+            let merging = dst.exists(&ddir).await?;
             dst.mkdir(&ddir).await?;
+            let mut taken = std::collections::HashSet::new();
             for e in src.list(&sdir).await? {
-                let target = dst.join(&ddir, &e.name);
-                if e.is_dir && !e.is_symlink {
+                // Names come from a (possibly hostile) remote listing: they must be valid
+                // single path components on the destination, or they could escape it.
+                if dst.check_name(&e.name).is_err() || (e.is_dir && e.is_symlink) {
+                    self.set(job, |s| s.skipped += 1);
+                    self.add_done(job, e.size, 1);
+                    continue;
+                }
+                let mut target = dst.join(&ddir, &e.name);
+                // Two source names that fold to the same destination name ("README" and
+                // "readme" onto macOS/Windows) must never overwrite each other.
+                let key = if dst.case_insensitive() { e.name.to_lowercase() } else { e.name.clone() };
+                let folded_clash = !taken.insert(key);
+                let mut replace_file = false;
+                if folded_clash {
+                    target = vfs::unique_name(&**dst, &ddir, &e.name, e.is_dir).await?;
+                } else if merging && dst.exists(&target).await? {
+                    match job.req.conflict {
+                        Conflict::Skip => {
+                            self.set(job, |s| s.skipped += 1);
+                            self.add_done(job, e.size, 1);
+                            continue;
+                        }
+                        Conflict::KeepBoth => target = vfs::unique_name(&**dst, &ddir, &e.name, e.is_dir).await?,
+                        Conflict::Overwrite => {
+                            let existing = dst.stat(&target).await?;
+                            match (existing.is_dir, e.is_dir) {
+                                (true, true) => {}
+                                (false, false) => replace_file = true,
+                                _ => dst.remove(&target).await?,
+                            }
+                        }
+                    }
+                }
+                if e.is_dir {
                     stack.push((e.path, target));
                 } else {
-                    if job.req.conflict == Conflict::Overwrite && dst.exists(&target).await? {
-                        dst.remove(&target).await?;
-                    }
-                    self.copy_file(job, src, dst, &e.path, &target, same_fs).await?;
+                    self.copy_file(job, src, dst, &e.path, &target, same_fs, replace_file).await?;
                 }
             }
         }
         Ok(())
     }
 
-    async fn copy_file(&self, job: &Arc<Job>, src: &DynProvider, dst: &DynProvider, from: &str, to: &str, same_fs: bool) -> AppResult<()> {
+    /// Copies one file. With `replace`, the data goes to a temporary sibling first and
+    /// only then takes the target's place, so a cancelled or failed copy never destroys
+    /// the file being replaced.
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_file(
+        &self,
+        job: &Arc<Job>,
+        src: &DynProvider,
+        dst: &DynProvider,
+        from: &str,
+        to: &str,
+        same_fs: bool,
+        replace: bool,
+    ) -> AppResult<()> {
         check(job).await?;
         let size = src.stat(from).await.map(|e| e.size).unwrap_or(0);
         self.set(job, |s| s.current = Some(display_name(from)));
+        // Object stores replace atomically on write; elsewhere stage next to the target.
+        let staged = replace && dst.caps().rename;
+        let write_to = if staged {
+            let parent = dst.parent(to).unwrap_or_else(|| dst.root());
+            let tag = &uuid::Uuid::new_v4().simple().to_string()[..8];
+            dst.join(&parent, &format!(".{}.atlas-part-{tag}", dst.file_name(to)))
+        } else {
+            to.to_string()
+        };
 
+        let result = self.copy_bytes(job, src, dst, from, &write_to, size, same_fs).await;
+        if let Err(e) = result {
+            // Never leave a truncated file behind (the original, if any, is untouched).
+            let _ = dst.remove(&write_to).await;
+            return Err(e);
+        }
+        if staged {
+            dst.remove(to).await?;
+            dst.rename(&write_to, to).await?;
+        }
+        self.set(job, |s| s.done_files += 1);
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn copy_bytes(
+        &self,
+        job: &Arc<Job>,
+        src: &DynProvider,
+        dst: &DynProvider,
+        from: &str,
+        to: &str,
+        size: u64,
+        same_fs: bool,
+    ) -> AppResult<()> {
         // Same-backend server-side / OS-level copy (APFS clone, S3 CopyObject…).
         let small_or_remote = size <= FAST_COPY_MAX || src.is_remote();
-        if same_fs && small_or_remote && src.caps().server_copy {
-            if let Ok(true) = src.copy_file(from, to).await {
-                self.progress(job, size);
-                self.set(job, |s| s.done_files += 1);
-                return Ok(());
-            }
+        if same_fs
+            && small_or_remote
+            && src.caps().server_copy
+            && let Ok(true) = src.copy_file(from, to).await
+        {
+            self.progress(job, size);
+            return Ok(());
         }
-
         let mut reader = src.reader(from).await?;
         let mut writer = dst.writer(to).await?;
         let mut buf = vec![0u8; BUF];
-        let result: AppResult<()> = async {
-            loop {
-                check(job).await?;
-                let n = tokio::select! {
-                    r = reader.read(&mut buf) => r?,
-                    _ = job.cancel.cancelled() => return Err(AppError::Cancelled),
-                };
-                if n == 0 {
-                    break;
-                }
-                tokio::select! {
-                    r = writer.write_all(&buf[..n]) => r?,
-                    _ = job.cancel.cancelled() => return Err(AppError::Cancelled),
-                }
-                self.progress(job, n as u64);
+        loop {
+            check(job).await?;
+            let n = tokio::select! {
+                r = reader.read(&mut buf) => r?,
+                _ = job.cancel.cancelled() => return Err(AppError::Cancelled),
+            };
+            if n == 0 {
+                break;
             }
-            writer.shutdown().await?;
-            Ok(())
+            tokio::select! {
+                r = writer.write_all(&buf[..n]) => r?,
+                _ = job.cancel.cancelled() => return Err(AppError::Cancelled),
+            }
+            self.progress(job, n as u64);
         }
-        .await;
-        drop(writer);
-        if let Err(e) = result {
-            // Never leave a truncated file behind.
-            let _ = dst.remove(to).await;
-            return Err(e);
+        // Finishing can be long (WebDAV uploads the spooled file here): keep it cancellable.
+        tokio::select! {
+            r = writer.shutdown() => r?,
+            _ = job.cancel.cancelled() => return Err(AppError::Cancelled),
         }
-        self.set(job, |s| s.done_files += 1);
         Ok(())
     }
 
@@ -529,11 +606,7 @@ impl Manager {
         s.done_bytes += n;
         let speed = job.speed.lock().update(s.done_bytes);
         s.speed = speed;
-        s.eta_secs = if speed > 1.0 && s.total_bytes > s.done_bytes {
-            Some((s.total_bytes - s.done_bytes) as f64 / speed)
-        } else {
-            None
-        };
+        s.eta_secs = if speed > 1.0 && s.total_bytes > s.done_bytes { Some((s.total_bytes - s.done_bytes) as f64 / speed) } else { None };
         drop(s);
         (self.notify)();
     }
@@ -574,18 +647,6 @@ fn display_name(path: &str) -> String {
     path.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 
-/// True if `dest` is `src` or a descendant of it.
-fn is_inside(p: &dyn vfs::Provider, src: &str, dest: &str) -> bool {
-    let mut cur = Some(dest.to_string());
-    while let Some(c) = cur {
-        if c == src {
-            return true;
-        }
-        cur = p.parent(&c);
-    }
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,10 +655,8 @@ mod tests {
 
     fn manager() -> Arc<Manager> {
         let local: DynProvider = Arc::new(LocalFs);
-        let mem: DynProvider = Arc::new(vfs::dal::DalFs::new(
-            opendal::Operator::new(opendal::services::Memory::default()).unwrap().finish(),
-            true,
-        ));
+        let mem: DynProvider =
+            Arc::new(vfs::dal::DalFs::new(opendal::Operator::new(opendal::services::Memory::default()).unwrap().finish(), true));
         let resolve: Resolver = Arc::new(move |fs: String| {
             let p = if fs == "mem" { mem.clone() } else { local.clone() };
             Box::pin(async move { Ok(p) })
@@ -787,6 +846,173 @@ mod tests {
         .await;
         assert_eq!(s.status, Status::Done);
         assert!(!dir.path().join("src").exists());
+    }
+
+    async fn mem_with(files: &[(&str, &[u8])]) -> (Arc<Manager>, DynProvider) {
+        use tokio::io::AsyncWriteExt;
+        let mem: DynProvider =
+            Arc::new(vfs::dal::DalFs::new(opendal::Operator::new(opendal::services::Memory::default()).unwrap().finish(), true));
+        for (path, data) in files {
+            let mut w = mem.writer(path).await.unwrap();
+            w.write_all(data).await.unwrap();
+            w.shutdown().await.unwrap();
+        }
+        let local: DynProvider = Arc::new(LocalFs);
+        let m2 = mem.clone();
+        let resolve: Resolver = Arc::new(move |fs: String| {
+            let p = if fs == "mem" { m2.clone() } else { local.clone() };
+            Box::pin(async move { Ok(p) })
+        });
+        (Manager::new(2, resolve, Arc::new(|| {}), Arc::new(|_| {})), mem)
+    }
+
+    #[tokio::test]
+    async fn hostile_remote_names_cannot_escape_the_destination() {
+        let (m, _mem) = mem_with(&[("/pkg/ok.txt", b"ok"), ("/pkg/..\\..\\evil.txt", b"evil"), ("/pkg/a:b.txt", b"ads")]).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("dest");
+        std::fs::create_dir(&dest).unwrap();
+        let s = wait(
+            &m,
+            &m.enqueue(JobRequest {
+                kind: JobKind::Copy,
+                sources: vec![Loc { fs: "mem".into(), path: "/pkg".into() }],
+                dest: Some(loc("local", &dest)),
+                conflict: Conflict::KeepBoth,
+                open_after: false,
+            })
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(s.status, Status::Done, "{:?}", s.error);
+        assert!(dest.join("pkg/ok.txt").exists());
+        assert!(s.skipped >= 1);
+        // Nothing was written outside dest/pkg.
+        let outside: Vec<_> =
+            walkdir::WalkDir::new(dir.path()).into_iter().flatten().filter(|e| e.path().to_string_lossy().contains("evil")).collect();
+        assert!(outside.is_empty(), "{outside:?}");
+        if cfg!(windows) {
+            assert!(!dest.join("pkg").join("a").exists(), "':' must not create an alternate data stream");
+        }
+    }
+
+    #[tokio::test]
+    async fn names_that_fold_together_never_overwrite_each_other() {
+        let (m, _mem) = mem_with(&[("/docs/README.md", b"upper"), ("/docs/readme.md", b"lower")]).await;
+        let dir = tempfile::tempdir().unwrap();
+        let s = wait(
+            &m,
+            &m.enqueue(JobRequest {
+                kind: JobKind::Move,
+                sources: vec![Loc { fs: "mem".into(), path: "/docs".into() }],
+                dest: Some(loc("local", dir.path())),
+                conflict: Conflict::Overwrite,
+                open_after: false,
+            })
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(s.status, Status::Done, "{:?}", s.error);
+        let mut contents: Vec<Vec<u8>> =
+            std::fs::read_dir(dir.path().join("docs")).unwrap().flatten().map(|e| std::fs::read(e.path()).unwrap()).collect();
+        contents.sort();
+        assert_eq!(contents, vec![b"lower".to_vec(), b"upper".to_vec()], "both files must survive");
+    }
+
+    #[tokio::test]
+    async fn replace_refuses_to_delete_a_folder_containing_the_source() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("a/report")).unwrap();
+        std::fs::write(dir.path().join("a/report/report"), b"precious").unwrap();
+        let m = manager();
+        let s = wait(
+            &m,
+            &m.enqueue(JobRequest {
+                kind: JobKind::Move,
+                sources: vec![loc("local", &dir.path().join("a/report/report"))],
+                dest: Some(loc("local", &dir.path().join("a"))),
+                conflict: Conflict::Overwrite,
+                open_after: false,
+            })
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(s.status, Status::Failed);
+        assert_eq!(std::fs::read(dir.path().join("a/report/report")).unwrap(), b"precious");
+    }
+
+    #[tokio::test]
+    async fn into_itself_is_caught_despite_trailing_separator() {
+        let dir = tempfile::tempdir().unwrap();
+        tree(dir.path());
+        let m = manager();
+        let dest = format!("{}{}", dir.path().join("src").to_string_lossy(), std::path::MAIN_SEPARATOR);
+        let s = wait(
+            &m,
+            &m.enqueue(JobRequest {
+                kind: JobKind::Copy,
+                sources: vec![loc("local", &dir.path().join("src"))],
+                dest: Some(Loc { fs: "local".into(), path: dest }),
+                conflict: Conflict::KeepBoth,
+                open_after: false,
+            })
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(s.status, Status::Failed);
+        assert!(!dir.path().join("src/src").exists());
+    }
+
+    #[tokio::test]
+    async fn replace_is_atomic_and_leaves_no_staging_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.bin"), vec![9u8; 2 * 1024 * 1024]).unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f.bin"), b"old").unwrap();
+        let m = manager();
+        let s = wait(
+            &m,
+            &m.enqueue(JobRequest {
+                kind: JobKind::Copy,
+                sources: vec![loc("local", &dir.path().join("f.bin"))],
+                dest: Some(loc("local", &dir.path().join("d"))),
+                conflict: Conflict::Overwrite,
+                open_after: false,
+            })
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(s.status, Status::Done, "{:?}", s.error);
+        assert_eq!(std::fs::read(dir.path().join("d/f.bin")).unwrap().len(), 2 * 1024 * 1024);
+        let names: Vec<String> =
+            std::fs::read_dir(dir.path().join("d")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec!["f.bin".to_string()]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn folder_links_inside_a_tree_are_skipped_not_fatal() {
+        let dir = tempfile::tempdir().unwrap();
+        tree(dir.path());
+        std::os::unix::fs::symlink(dir.path().join("src/nested"), dir.path().join("src/lib64")).unwrap();
+        std::fs::create_dir(dir.path().join("dst")).unwrap();
+        let m = manager();
+        let s = wait(
+            &m,
+            &m.enqueue(JobRequest {
+                kind: JobKind::Move,
+                sources: vec![loc("local", &dir.path().join("src"))],
+                dest: Some(Loc { fs: "mem".into(), path: "/".into() }),
+                conflict: Conflict::KeepBoth,
+                open_after: false,
+            })
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(s.status, Status::Done, "{:?}", s.error);
+        assert_eq!(s.skipped, 1);
+        // Something was skipped, so the move keeps the source.
+        assert!(dir.path().join("src/a.txt").exists());
     }
 
     #[test]

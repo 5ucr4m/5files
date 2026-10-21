@@ -51,6 +51,8 @@ export interface Backend {
   search(fs: FsId, root: string, query: string, includeHidden: boolean, onEvent: (e: SearchEvent) => void): Promise<string>;
   cancelSearch(id: string): Promise<void>;
   open(fs: FsId, path: string): Promise<string | null>;
+  /** Streams a browser File (OS drop without a path, i.e. Windows) into `dir`; returns the new path. */
+  uploadFile(fs: FsId, dir: string, file: File, onProgress?: (done: number) => void): Promise<string>;
   reveal(path: string): Promise<void>;
   /** URL the <img>/<video> tags can load for a local file. */
   fileUrl(path: string): string;
@@ -116,6 +118,21 @@ async function tauriBackend(): Promise<Backend> {
     },
     cancelSearch: (id) => invoke("search_cancel", { id }),
     open: (fs, path) => invoke("open_item", { fs, path }),
+    async uploadFile(fs, dir, file, onProgress) {
+      const id = await invoke<string>("upload_begin", { fs, dir, name: file.name });
+      const CHUNK = 4 * 1024 * 1024;
+      try {
+        for (let off = 0; off < file.size; off += CHUNK) {
+          const bytes = new Uint8Array(await file.slice(off, off + CHUNK).arrayBuffer());
+          await invoke("upload_chunk", bytes, { headers: { "x-upload-id": id } });
+          onProgress?.(Math.min(file.size, off + CHUNK));
+        }
+      } catch (e) {
+        await invoke("upload_end", { id, cancel: true }).catch(() => {});
+        throw e;
+      }
+      return invoke<string>("upload_end", { id, cancel: false });
+    },
     reveal: (path) => invoke("reveal_item", { path }),
     fileUrl: (path) => convertFileSrc(path),
     thumbUrl: (path, size) => `${convertFileSrc(path, "thumb")}?s=${size}`,

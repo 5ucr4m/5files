@@ -1,6 +1,6 @@
 // User-level file operations. Everything long-running goes through the transfer queue.
 import { api, errorKind, errorMessage } from "./api";
-import { freshName } from "./format";
+import { formatBytes, freshName } from "./format";
 import type { Entry, FsId, JobKind, Loc } from "./types";
 import { activeTab, useTabs, type Tab } from "../store/tabs";
 import { confirmDialog, conflictDialog, toast, useUi } from "../store/ui";
@@ -162,6 +162,10 @@ export async function openConnection(id: string, opts?: { newTab?: boolean }) {
   try {
     const root = await api().connect(id);
     drives.setStatus(id, "connected");
+    drives.setRoot(id, root);
+    // The backend may have learned things on connect (e.g. the SSH host key): keep the
+    // store current so an edit form opened later doesn't send stale options.
+    void drives.refreshConnections();
     const t = activeTab();
     const loc = { fs: id, path: root };
     if (!t || opts?.newTab) useTabs.getState().newTab(loc);
@@ -180,4 +184,22 @@ export async function openConnection(id: string, opts?: { newTab?: boolean }) {
 
 export function plural(n: number, word: string) {
   return `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** Files dropped from the OS that arrive without paths (HTML5 drop, Windows). */
+export async function uploadDropped(dest: Loc, files: File[]) {
+  if (!files.length) return;
+  const total = files.reduce((t, f) => t + f.size, 0);
+  toast({ tone: "info", title: `Copying ${plural(files.length, "item")} here`, body: formatBytes(total) });
+  let failed = 0;
+  for (const f of files) {
+    try {
+      await api().uploadFile(dest.fs, dest.path, f);
+    } catch (e) {
+      failed++;
+      toast({ tone: "error", title: `Couldn't copy "${f.name}"`, body: errorMessage(e) });
+    }
+  }
+  useTabs.getState().refreshWhere((t) => t.fs === dest.fs && t.path === dest.path);
+  if (!failed) toast({ tone: "success", title: `Copied ${plural(files.length, "item")}` });
 }

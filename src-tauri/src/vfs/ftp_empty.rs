@@ -31,10 +31,7 @@ pub async fn create_empty(t: &FtpTarget, path: &str) -> AppResult<()> {
         }
         let cfg = suppaftp::rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
         let host = t.addr.rsplit_once(':').map(|(h, _)| h).unwrap_or(&t.addr).to_string();
-        stream
-            .into_secure(AsyncRustlsConnector::from(futures_rustls::TlsConnector::from(Arc::new(cfg))), &host)
-            .await
-            .map_err(err)?
+        stream.into_secure(AsyncRustlsConnector::from(futures_rustls::TlsConnector::from(Arc::new(cfg))), &host).await.map_err(err)?
     } else {
         stream
     };

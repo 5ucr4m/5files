@@ -109,7 +109,7 @@ pub async fn run(
             if e.hidden && !include_hidden {
                 continue;
             }
-            if e.is_dir {
+            if e.is_dir && !e.is_symlink {
                 queue.push_back(e.path.clone());
             }
             if matcher.matches(&e.name) {
@@ -134,21 +134,22 @@ pub async fn run(
 
 fn search_local(root: &str, m: &Matcher, include_hidden: bool, cancel: &CancellationToken, emit: &dyn Fn(SearchEvent)) {
     let (mut found, mut batch, mut scanned, mut last) = (0usize, Vec::new(), 0u64, Instant::now());
-    let walker = walkdir::WalkDir::new(root).min_depth(1).follow_links(false).into_iter().filter_entry(|e| {
-        include_hidden || !e.file_name().to_string_lossy().starts_with('.')
-    });
+    let walker = walkdir::WalkDir::new(root)
+        .min_depth(1)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| include_hidden || !e.file_name().to_string_lossy().starts_with('.'));
     for de in walker.flatten() {
         if cancel.is_cancelled() {
             break;
         }
         scanned += 1;
-        if m.matches(&de.file_name().to_string_lossy()) {
-            if let Ok(e) = local::entry_from_path(de.path()) {
-                if include_hidden || !e.hidden {
-                    found += 1;
-                    batch.push(e);
-                }
-            }
+        if m.matches(&de.file_name().to_string_lossy())
+            && let Ok(e) = local::entry_from_path(de.path())
+            && (include_hidden || !e.hidden)
+        {
+            found += 1;
+            batch.push(e);
         }
         if batch.len() >= BATCH || (last.elapsed() >= FLUSH_EVERY && (!batch.is_empty() || scanned % 512 == 0)) {
             if !batch.is_empty() {

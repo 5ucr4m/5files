@@ -43,10 +43,10 @@ fn cache_key(path: &Path, meta: &std::fs::Metadata, size: u32) -> String {
     let mut h = Sha256::new();
     h.update(path.to_string_lossy().as_bytes());
     h.update(meta.len().to_le_bytes());
-    if let Ok(m) = meta.modified() {
-        if let Ok(d) = m.duration_since(std::time::UNIX_EPOCH) {
-            h.update(d.as_nanos().to_le_bytes());
-        }
+    if let Ok(m) = meta.modified()
+        && let Ok(d) = m.duration_since(std::time::UNIX_EPOCH)
+    {
+        h.update(d.as_nanos().to_le_bytes());
     }
     h.update(size.to_le_bytes());
     hex::encode(&h.finalize()[..16])
@@ -110,11 +110,7 @@ pub async fn respond(uri: String, cache_dir: PathBuf) -> Response<Vec<u8>> {
 }
 
 fn status(code: StatusCode) -> Response<Vec<u8>> {
-    Response::builder()
-        .status(code)
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .body(Vec::new())
-        .unwrap()
+    Response::builder().status(code).header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*").body(Vec::new()).unwrap()
 }
 
 #[cfg(test)]

@@ -474,6 +474,13 @@ export function createMockBackend(): Backend {
     async open() {
       return null;
     },
+    async uploadFile(fs, dir, file) {
+      const d = lookup(fs, dir);
+      const name = uniqueName(d, file.name, false);
+      d.children!.set(name, { name, dir: false, size: file.size, modified: Date.now() });
+      fsEv.emit([dir]);
+      return join(dir, name);
+    },
     async reveal() {},
     fileUrl: (path) => svgPlaceholder(path, 1200),
     thumbUrl: (path, size) => svgPlaceholder(path, size),

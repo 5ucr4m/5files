@@ -7,12 +7,12 @@
 use super::ftp_empty::{FtpTarget, create_empty};
 use super::spool::{HttpPut, SpoolWriter};
 use super::{BoxReader, BoxWriter, Caps, Entry, Provider, posix};
-use std::sync::Arc;
 use crate::error::{AppError, AppResult};
 use crate::metrics::{self, Channel, CountingReader, CountingWriter};
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use opendal::{EntryMode, Metadata, Operator};
+use std::sync::Arc;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt};
 
 const CHUNK: usize = 8 * 1024 * 1024;
@@ -208,7 +208,11 @@ struct EmptyAware<W> {
 }
 
 impl<W: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for EmptyAware<W> {
-    fn poll_write(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> std::task::Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
         if !buf.is_empty() {
             self.wrote = true;
         }

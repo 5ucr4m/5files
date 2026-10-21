@@ -43,14 +43,22 @@ pub fn auth_url(client_id: &str, redirect: &str, challenge: &str, state: &str) -
     )
 }
 
-/// Extracts `code` from the redirect request line, validating `state`.
-pub fn parse_redirect(request: &str, expected_state: &str) -> AppResult<String> {
+/// Outcome of one request to the loopback listener.
+#[derive(Debug, PartialEq)]
+pub enum Redirect {
+    /// Not our redirect (favicon, preconnect, wrong/missing state): ignore and keep waiting.
+    Unrelated,
+    Code(String),
+    Denied(String),
+}
+
+/// Parses the redirect request line. `state` is validated first, so a stray local
+/// request can neither complete nor abort the sign-in.
+pub fn parse_redirect(request: &str, expected_state: &str) -> Redirect {
     let line = request.lines().next().unwrap_or("");
     let target = line.split_whitespace().nth(1).unwrap_or("");
     let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
-    let mut code = None;
-    let mut state = None;
-    let mut error = None;
+    let (mut code, mut state, mut error) = (None, None, None);
     for kv in query.split('&') {
         let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
         let v = urlencoding::decode(v).map(|c| c.into_owned()).unwrap_or_default();
@@ -61,13 +69,18 @@ pub fn parse_redirect(request: &str, expected_state: &str) -> AppResult<String> 
             _ => {}
         }
     }
-    if let Some(e) = error {
-        return Err(AppError::Auth(format!("Google sign-in was denied: {e}")));
-    }
     if state.as_deref() != Some(expected_state) {
-        return Err(AppError::Auth("OAuth state mismatch".into()));
+        return Redirect::Unrelated;
     }
-    code.ok_or_else(|| AppError::Auth("no authorization code received".into()))
+    match (code, error) {
+        (_, Some(e)) => Redirect::Denied(e),
+        (Some(c), None) if !c.is_empty() => Redirect::Code(c),
+        _ => Redirect::Unrelated,
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Atlas</title><body style=\"font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#0b0d12;color:#e7e9ee\"><div style=\"text-align:center\"><h2>You're signed in ✓</h2><p style=\"opacity:.7\">You can close this tab and return to Atlas.</p></div>";
@@ -83,32 +96,43 @@ pub async fn google_sign_in(client_id: &str, client_secret: &str, open: impl FnO
     let state = b64(&st);
     open(&auth_url(client_id, &redirect, &p.challenge, &state))?;
 
-    let code = tokio::time::timeout(TIMEOUT, async {
+    // Each connection is served by its own task with a read timeout, so an idle browser
+    // preconnect can't stall the real redirect arriving on another socket.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Redirect>(8);
+    let accept = tokio::spawn(async move {
         loop {
-            let (mut sock, _) = listener.accept().await?;
-            let mut buf = vec![0u8; 8192];
-            let n = sock.read(&mut buf).await?;
-            let req = String::from_utf8_lossy(&buf[..n]).to_string();
-            // Browsers may probe /favicon.ico; ignore anything without our params.
-            if !req.contains("state=") {
-                let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;
-                continue;
-            }
-            let result = parse_redirect(&req, &state);
-            let body = match &result {
-                Ok(_) => DONE_PAGE.to_string(),
-                Err(e) => format!("<!doctype html><meta charset=utf-8><p>{e}</p>"),
-            };
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = sock.write_all(resp.as_bytes()).await;
-            return result;
+            let Ok((mut sock, _)) = listener.accept().await else { break };
+            let (tx, state) = (tx.clone(), state.clone());
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(10), sock.read(&mut buf)).await else { return };
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let outcome = parse_redirect(&req, &state);
+                let (status, body) = match &outcome {
+                    Redirect::Unrelated => ("404 Not Found", String::new()),
+                    Redirect::Code(_) => ("200 OK", DONE_PAGE.to_string()),
+                    Redirect::Denied(e) => {
+                        ("200 OK", format!("<!doctype html><meta charset=utf-8><p>Sign-in was cancelled: {}</p>", html_escape(e)))
+                    }
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                if outcome != Redirect::Unrelated {
+                    let _ = tx.send(outcome).await;
+                }
+            });
         }
-    })
-    .await
-    .map_err(|_| AppError::Auth("timed out waiting for Google sign-in".into()))??;
+    });
+    let outcome = tokio::time::timeout(TIMEOUT, rx.recv()).await;
+    accept.abort();
+    let code = match outcome {
+        Ok(Some(Redirect::Code(c))) => c,
+        Ok(Some(Redirect::Denied(e))) => return Err(AppError::Auth(format!("Google sign-in was denied: {e}"))),
+        _ => return Err(AppError::Auth("timed out waiting for Google sign-in".into())),
+    };
 
     #[derive(serde::Deserialize)]
     struct TokenResp {
@@ -150,12 +174,15 @@ mod tests {
     }
 
     #[test]
-    fn redirect_parsing_validates_state() {
+    fn redirect_parsing_validates_state_first() {
         let req = "GET /?state=abc&code=4%2F0Ad&scope=x HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
-        assert_eq!(parse_redirect(req, "abc").unwrap(), "4/0Ad");
-        assert!(matches!(parse_redirect(req, "zzz"), Err(AppError::Auth(_))));
-        let denied = "GET /?error=access_denied&state=abc HTTP/1.1\r\n";
-        assert!(parse_redirect(denied, "abc").is_err());
+        assert_eq!(parse_redirect(req, "abc"), Redirect::Code("4/0Ad".into()));
+        assert_eq!(parse_redirect(req, "zzz"), Redirect::Unrelated);
+        // A stray request with an error but the wrong state must not abort the flow.
+        assert_eq!(parse_redirect("GET /?error=x&state=nope HTTP/1.1", "abc"), Redirect::Unrelated);
+        assert_eq!(parse_redirect("GET /?error=access_denied&state=abc HTTP/1.1", "abc"), Redirect::Denied("access_denied".into()));
+        assert_eq!(parse_redirect("GET /favicon.ico HTTP/1.1", "abc"), Redirect::Unrelated);
+        assert_eq!(html_escape("<script>"), "&lt;script&gt;");
     }
 
     #[test]

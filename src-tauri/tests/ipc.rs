@@ -51,6 +51,26 @@ impl Harness {
         .map(|b| b.deserialize::<Value>().unwrap())
     }
 
+    fn raw(&self, cmd: &str, body: Vec<u8>, headers: &[(&'static str, &str)]) -> Result<Value, Value> {
+        let mut map = tauri::http::HeaderMap::new();
+        for (k, v) in headers {
+            map.insert(*k, v.parse().unwrap());
+        }
+        get_ipc_response(
+            &self.win,
+            InvokeRequest {
+                cmd: cmd.into(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" }.parse().unwrap(),
+                body: InvokeBody::Raw(body),
+                headers: map,
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+        .map(|b| b.deserialize::<Value>().unwrap())
+    }
+
     fn ok(&self, cmd: &str, args: Value) -> Value {
         self.call(cmd, args).unwrap_or_else(|e| panic!("{cmd} failed: {e}"))
     }
@@ -176,7 +196,10 @@ fn connections_are_saved_without_secrets_and_tested() {
     assert_eq!(list.as_array().unwrap().len(), 1);
 
     // Port 1 refuses connections: test/connect report an error instead of hanging.
-    let err = h.call("connection_test", json!({ "input": { "id": saved["id"], "name": "Box", "kind": "ftp", "options": { "host": "127.0.0.1", "port": "1" } } }));
+    let err = h.call(
+        "connection_test",
+        json!({ "input": { "id": saved["id"], "name": "Box", "kind": "ftp", "options": { "host": "127.0.0.1", "port": "1" } } }),
+    );
     assert!(err.is_err());
     let err = h.call("connection_connect", json!({ "id": saved["id"] })).unwrap_err();
     assert!(!err["message"].as_str().unwrap().is_empty());
@@ -194,4 +217,28 @@ fn platform_volumes_and_places() {
     assert_eq!(p["os"], std::env::consts::OS);
     assert!(!h.ok("get_volumes", json!({})).as_array().unwrap().is_empty());
     assert!(h.ok("get_places", json!({})).as_array().unwrap().iter().any(|p| p["id"] == "home"));
+}
+
+#[test]
+fn os_drop_uploads_stream_raw_chunks() {
+    let h = harness();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("photo.jpg"), b"existing").unwrap();
+    let id = h.ok("upload_begin", json!({ "fs": "local", "dir": s(dir.path()), "name": "photo.jpg" }));
+    let id = id.as_str().unwrap().to_string();
+    for chunk in [vec![1u8; 300_000], vec![2u8; 123]] {
+        h.raw("upload_chunk", chunk, &[("x-upload-id", &id)]).unwrap();
+    }
+    let path = h.ok("upload_end", json!({ "id": id, "cancel": false }));
+    // Never overwrites: the dropped file got a fresh name.
+    assert!(path.as_str().unwrap().ends_with("photo (2).jpg"), "{path}");
+    assert_eq!(std::fs::metadata(path.as_str().unwrap()).unwrap().len(), 300_123);
+    assert_eq!(std::fs::read(dir.path().join("photo.jpg")).unwrap(), b"existing");
+
+    // Cancelled uploads leave nothing behind; hostile names are refused.
+    let id = h.ok("upload_begin", json!({ "fs": "local", "dir": s(dir.path()), "name": "half.bin" }));
+    h.raw("upload_chunk", vec![0u8; 10], &[("x-upload-id", id.as_str().unwrap())]).unwrap();
+    assert!(h.call("upload_end", json!({ "id": id, "cancel": true })).is_err());
+    assert!(!dir.path().join("half.bin").exists());
+    assert_eq!(h.call("upload_begin", json!({ "fs": "local", "dir": s(dir.path()), "name": "../x" })).unwrap_err()["kind"], "invalid");
 }

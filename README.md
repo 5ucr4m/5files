@@ -20,13 +20,19 @@ Atlas itself is using.
 **Working with files**
 - Copy / cut / paste across tabs **and across drives** (local ⇄ S3 ⇄ SFTP …), duplicate, rename inline (F2)
 - Drag & drop between views, tabs, breadcrumbs and the sidebar (`⌥`/`Ctrl` forces copy), drop files in from the OS
+  (on Windows, where WebView2 hides dropped paths, dropped files are streamed in; dropping folders from
+  Explorer isn't supported yet — use copy & paste)
 - Name conflicts ask once: keep both, replace (folders merge) or skip
 - Rubber-band selection, Shift/⌘ ranges, type-ahead, full keyboard navigation, context menus, command palette (`⌘K`/`Ctrl+K`)
 
 **Transfer queue**
 - Every copy/move/delete is a job with byte-accurate progress, speed, ETA, pause/resume, cancel, retry
 - 3 jobs run in parallel; moves on the same drive are instant renames; small files use the OS fast path
-  (APFS clones on macOS); cancelled copies never leave half-written files
+  (APFS clones on macOS); cancelled copies never leave half-written files, and "Replace" writes to a
+  temporary file first, so the original survives a failed or cancelled copy
+- Safety rails: names from remote listings are validated for the destination OS (no `../`, `..\`,
+  NTFS streams or reserved device names), case-only clashes never overwrite each other, folders can't
+  be copied into themselves or replaced by something they contain
 
 **Remote drives** (sidebar → Remote → `+`)
 | Integration | Notes |

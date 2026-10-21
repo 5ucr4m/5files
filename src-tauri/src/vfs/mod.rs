@@ -118,6 +118,26 @@ pub trait Provider: Send + Sync {
         Ok(None)
     }
 
+    // --- identity & naming (safety checks in the transfer engine) ---
+
+    /// Rejects names that can't be created here (or would escape the parent folder).
+    fn check_name(&self, name: &str) -> AppResult<()> {
+        check_name(name, false)
+    }
+    /// Whether two paths are the same entry (not just the same string).
+    async fn same_entry(&self, a: &str, b: &str) -> bool {
+        posix::normalize(a) == posix::normalize(b)
+    }
+    /// Whether `path` is `ancestor` or lies inside it.
+    async fn contains(&self, ancestor: &str, path: &str) -> bool {
+        let (a, p) = (posix::normalize(ancestor), posix::normalize(path));
+        a == p || a == "/" || p.starts_with(&format!("{a}/"))
+    }
+    /// Names differing only in case collide (macOS / Windows local disks).
+    fn case_insensitive(&self) -> bool {
+        false
+    }
+
     // --- path helpers (POSIX-style by default; local overrides with OS semantics) ---
 
     fn join(&self, parent: &str, name: &str) -> String {
@@ -217,7 +237,21 @@ pub async fn unique_name(p: &dyn Provider, parent: &str, name: &str, is_dir: boo
     Err(AppError::AlreadyExists(name.into()))
 }
 
+/// Validates a name for the current OS's local file system.
 pub fn validate_name(name: &str) -> AppResult<()> {
+    check_name(name, cfg!(windows))
+}
+
+const WINDOWS_RESERVED: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4",
+    "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Name rules. Always: non-empty, not `.`/`..`, no path separators (`/` or `\`) and no
+/// NUL — so a name from a remote listing can never escape its parent folder. With
+/// `windows`: also no `<>:"|?*` (`:` would create an NTFS alternate data stream),
+/// control characters, trailing dot/space, or reserved device names (`CON`, `aux.c`…).
+pub fn check_name(name: &str, windows: bool) -> AppResult<()> {
     let bad = name.is_empty()
         || name == "."
         || name == ".."
@@ -228,11 +262,15 @@ pub fn validate_name(name: &str) -> AppResult<()> {
     if bad {
         return Err(AppError::Invalid(format!("invalid file name: {name:?}")));
     }
-    #[cfg(windows)]
-    {
-        const RESERVED: &[char] = &['<', '>', ':', '"', '|', '?', '*'];
-        if name.chars().any(|c| RESERVED.contains(&c)) || name.ends_with('.') || name.ends_with(' ') {
-            return Err(AppError::Invalid(format!("invalid file name on Windows: {name:?}")));
+    if windows {
+        const BAD: &[char] = &['<', '>', ':', '"', '|', '?', '*'];
+        let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+        if name.chars().any(|c| BAD.contains(&c) || (c as u32) < 32)
+            || name.ends_with('.')
+            || name.ends_with(' ')
+            || WINDOWS_RESERVED.contains(&stem.as_str())
+        {
+            return Err(AppError::Invalid(format!("name not allowed on Windows: {name:?}")));
         }
     }
     Ok(())
@@ -274,6 +312,28 @@ mod tests {
         assert_eq!(ext_of(".bashrc"), None);
         assert_eq!(ext_of("noext"), None);
         assert_eq!(ext_of("archive.tar.gz"), Some("gz".into()));
+    }
+
+    #[test]
+    fn hostile_names_are_rejected() {
+        for n in ["../x", "..", "a/b", "..\\..\\evil.bat", "a\0b"] {
+            assert!(check_name(n, false).is_err(), "{n:?}");
+        }
+        for n in ["foo:bar", "aux.c", "CON", "nul.txt", "trailing.", "tab\tname", "a?b"] {
+            assert!(check_name(n, true).is_err(), "{n:?}");
+            assert!(check_name(n, false).is_ok() || n.contains('\t'), "{n:?} should be fine off Windows");
+        }
+        assert!(check_name("auxiliary.txt", true).is_ok());
+        assert!(check_name("report (2).pdf", true).is_ok());
+    }
+
+    #[tokio::test]
+    async fn default_identity_helpers_are_boundary_aware() {
+        let p = dal::DalFs::new(opendal::Operator::new(opendal::services::Memory::default()).unwrap().finish(), true);
+        assert!(p.contains("/a", "/a/b").await);
+        assert!(p.contains("/a/", "/a").await);
+        assert!(!p.contains("/a", "/ab").await);
+        assert!(p.same_entry("/a/b/", "/a/b").await);
     }
 
     #[test]

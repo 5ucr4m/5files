@@ -61,8 +61,9 @@ impl From<std::io::Error> for AppError {
             NotFound => AppError::NotFound(e.to_string()),
             AlreadyExists => AppError::AlreadyExists(e.to_string()),
             PermissionDenied => AppError::PermissionDenied(e.to_string()),
-            ConnectionRefused | ConnectionReset | ConnectionAborted | NotConnected | TimedOut
-            | BrokenPipe => AppError::Connection(e.to_string()),
+            ConnectionRefused | ConnectionReset | ConnectionAborted | NotConnected | TimedOut | BrokenPipe => {
+                AppError::Connection(e.to_string())
+            }
             _ => AppError::Other(e.to_string()),
         }
     }

@@ -5,6 +5,8 @@ import type { Entry, FsId, Listing, Loc } from "../lib/types";
 import { useSettings, type ViewMode } from "./settings";
 
 export interface SearchState {
+  /** Unique per search run; events from older runs are ignored. */
+  run: number;
   id: string | null;
   query: string;
   results: Entry[];
@@ -79,6 +81,11 @@ function blank(loc: Loc): Tab {
   };
 }
 
+/** Stops a tab's running search in the backend (if any). */
+function stopSearch(t: Tab | undefined) {
+  if (t?.search?.id && t.search.running) void api().cancelSearch(t.search.id).catch(() => {});
+}
+
 /** Race guard: only the latest request per tab may write its result. */
 const reqSeq = new Map<string, number>();
 
@@ -138,11 +145,13 @@ export const useTabs = create<TabsState>((set, get) => {
         return;
       }
       const i = tabs.findIndex((t) => t.id === id);
+      stopSearch(tabs[i]);
       const next = tabs.filter((t) => t.id !== id);
       set({ tabs: next, active: active === id ? next[Math.min(i, next.length - 1)].id : active });
       reqSeq.delete(id);
     },
     closeOthers(id) {
+      get().tabs.filter((t) => t.id !== id).forEach(stopSearch);
       set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), active: id }));
     },
     activate: (id) => set({ active: id }),
@@ -161,6 +170,7 @@ export const useTabs = create<TabsState>((set, get) => {
     },
     async navigate(id, loc, opts) {
       const push = opts?.push ?? true;
+      stopSearch(get().tabs.find((t) => t.id === id));
       update(id, (t) => {
         const history = push ? [...t.history.slice(0, t.index + 1), loc] : t.history;
         return {

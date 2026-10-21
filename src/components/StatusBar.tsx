@@ -1,11 +1,24 @@
 import { Clipboard, Loader2, Settings2 } from "lucide-react";
 import { formatBytes } from "../lib/format";
 import { plural, selectedEntries } from "../lib/ops";
+import { platform } from "../lib/platform";
 import { useDrives } from "../store/live";
 import { useSettings } from "../store/settings";
 import type { Tab } from "../store/tabs";
 import { useUi } from "../store/ui";
 import { visibleEntries } from "./FileView";
+
+/** The volume a path lives on: longest mount that is the path or a parent of it. */
+export function volumeFor<V extends { mount: string }>(volumes: V[], path: string, os: string): V | undefined {
+  const fold = os === "linux" ? (x: string) => x : (x: string) => x.toLowerCase();
+  const p = fold(path);
+  return volumes
+    .filter((v) => {
+      const m = fold(v.mount).replace(/[\\/]+$/, "");
+      return p === m || m === "" || p.startsWith(m + "/") || p.startsWith(m + "\\") || (m.endsWith(":") && p.startsWith(m));
+    })
+    .sort((a, b) => b.mount.length - a.mount.length)[0];
+}
 
 export function StatusBar({ tab }: { tab: Tab }) {
   const showHidden = useSettings((s) => s.showHidden);
@@ -16,10 +29,7 @@ export function StatusBar({ tab }: { tab: Tab }) {
   const sel = selectedEntries(tab);
   const selBytes = sel.reduce((t, e) => t + (e.isDir ? 0 : e.size), 0);
   // Longest mount point that prefixes the current path = the volume we're on.
-  const vol =
-    tab.fs === "local"
-      ? volumes.filter((v) => tab.path.toLowerCase().startsWith(v.mount.toLowerCase())).sort((a, b) => b.mount.length - a.mount.length)[0]
-      : undefined;
+  const vol = tab.fs === "local" ? volumeFor(volumes, tab.path, platform().os) : undefined;
   const hidden = (tab.listing?.entries.length ?? 0) - (tab.listing?.entries.filter((e) => !e.hidden).length ?? 0);
 
   return (

@@ -144,9 +144,7 @@ fn map_russh(e: russh::Error) -> AppError {
 
 fn key_error(e: russh::keys::Error) -> AppError {
     match e {
-        russh::keys::Error::KeyIsEncrypted => {
-            AppError::Auth("the private key is encrypted: a passphrase is required".into())
-        }
+        russh::keys::Error::KeyIsEncrypted => AppError::Auth("the private key is encrypted: a passphrase is required".into()),
         russh::keys::Error::IO(io) => AppError::Invalid(format!("cannot read private key: {io}")),
         other => AppError::Auth(format!("invalid private key or passphrase: {other}")),
     }
@@ -198,10 +196,10 @@ fn expand_tilde(p: &str) -> std::path::PathBuf {
         if let Some(h) = dirs::home_dir() {
             return h;
         }
-    } else if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
-        if let Some(h) = dirs::home_dir() {
-            return h.join(rest);
-        }
+    } else if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\"))
+        && let Some(h) = dirs::home_dir()
+    {
+        return h.join(rest);
     }
     std::path::PathBuf::from(p)
 }
@@ -230,8 +228,7 @@ fn load_key(opts: &Opts, secrets: &Opts) -> AppResult<PrivateKey> {
     }
     let path = opt(opts, "keyPath").ok_or_else(|| AppError::Invalid("a private key (keyPath or privateKey) is required".into()))?;
     let path = expand_tilde(path);
-    let pem = std::fs::read_to_string(&path)
-        .map_err(|e| AppError::Invalid(format!("cannot read private key {}: {e}", path.display())))?;
+    let pem = std::fs::read_to_string(&path).map_err(|e| AppError::Invalid(format!("cannot read private key {}: {e}", path.display())))?;
     russh::keys::decode_secret_key(&pem, pass).map_err(key_error)
 }
 
@@ -239,15 +236,8 @@ async fn authenticate(handle: &mut client::Handle<Client>, user: &str, opts: &Op
     match auth_method(opts, secrets)? {
         AuthMethod::Key => {
             let key = load_key(opts, secrets)?;
-            let hash = if key.algorithm().is_rsa() {
-                handle.best_supported_rsa_hash().await.map_err(map_russh)?.flatten()
-            } else {
-                None
-            };
-            let res = handle
-                .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
-                .await
-                .map_err(map_russh)?;
+            let hash = if key.algorithm().is_rsa() { handle.best_supported_rsa_hash().await.map_err(map_russh)?.flatten() } else { None };
+            let res = handle.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await.map_err(map_russh)?;
             if !res.success() {
                 return Err(AppError::Auth(format!("public key rejected by the server for user {user}")));
             }
@@ -417,11 +407,8 @@ impl SftpFs {
                 // readdir attrs are lstat-like: a symlink to a dir is removed as a link.
                 .map(|d| (posix::join(&path, &d.file_name()), d.file_type().is_dir()))
                 .collect();
-            let results: Vec<AppResult<()>> = futures::stream::iter(children)
-                .map(|(p, d)| self.remove_tree(p, d))
-                .buffer_unordered(16)
-                .collect()
-                .await;
+            let results: Vec<AppResult<()>> =
+                futures::stream::iter(children).map(|(p, d)| self.remove_tree(p, d)).buffer_unordered(16).collect().await;
             for r in results {
                 match r {
                     Ok(()) | Err(AppError::NotFound(_)) => {}
@@ -755,10 +742,7 @@ UbB2mjL3Fw4xfGCg==
         assert!(matches!(&e, AppError::Auth(m) if m.contains("host key mismatch")));
         assert!(matches!(map_russh(russh::Error::Disconnect), AppError::Connection(_)));
         assert!(matches!(map_russh(russh::Error::UnknownKey), AppError::Auth(_)));
-        assert!(matches!(
-            map_russh(russh::Error::IO(io::Error::from(io::ErrorKind::ConnectionRefused))),
-            AppError::Connection(_)
-        ));
+        assert!(matches!(map_russh(russh::Error::IO(io::Error::from(io::ErrorKind::ConnectionRefused))), AppError::Connection(_)));
         assert!(matches!(key_error(russh::keys::Error::KeyIsEncrypted), AppError::Auth(_)));
     }
 

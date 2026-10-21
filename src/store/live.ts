@@ -45,15 +45,19 @@ interface DrivesState {
   volumes: Volume[];
   places: Place[];
   connections: Connection[];
+  /** Start folder of each connected drive (SFTP opens the user's home, not "/"). */
+  roots: Record<string, string>;
   refreshVolumes: () => Promise<void>;
   refreshConnections: () => Promise<void>;
   setStatus: (id: string, status: Connection["status"], error?: string | null) => void;
+  setRoot: (id: string, root: string) => void;
 }
 
 export const useDrives = create<DrivesState>((set) => ({
   volumes: [],
   places: [],
   connections: [],
+  roots: {},
   async refreshVolumes() {
     const [volumes, places] = await Promise.all([api().volumes(), api().places()]);
     set({ volumes, places });
@@ -61,6 +65,7 @@ export const useDrives = create<DrivesState>((set) => ({
   async refreshConnections() {
     set({ connections: await api().connections() });
   },
+  setRoot: (id, root) => set((s) => ({ roots: { ...s.roots, [id]: root } })),
   setStatus: (id, status, error = null) =>
     set((s) => ({ connections: s.connections.map((c) => (c.id === id ? { ...c, status, error } : c)) })),
 }));

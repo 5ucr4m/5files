@@ -110,11 +110,8 @@ export function TitleBar() {
     <header
       className="drag-region flex h-[46px] shrink-0 items-center gap-2 bg-bg"
       data-tauri-drag-region
-      onDoubleClick={(e) => {
-        if ((e.target as HTMLElement).closest(".no-drag")) return;
-        void api().window.toggleMaximize();
-      }}
     >
+      {/* Double-click to maximize is handled by Tauri's drag region itself. */}
       {/* macOS traffic lights sit here (overlay title bar). */}
       <div className={mac ? "w-[78px] shrink-0" : "w-2 shrink-0"} data-tauri-drag-region />
       <Reorder.Group axis="x" values={order} onReorder={onReorder} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" data-tauri-drag-region>

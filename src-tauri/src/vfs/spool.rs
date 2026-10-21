@@ -63,11 +63,7 @@ async fn send(put: Arc<HttpPut>, url: String, tmp: PathBuf, mut file: tokio::fs:
             metrics::add_write(Channel::Net, b.len() as u64);
         }
     });
-    let mut req = put
-        .client
-        .put(&url)
-        .header(reqwest::header::CONTENT_LENGTH, len)
-        .body(reqwest::Body::wrap_stream(stream));
+    let mut req = put.client.put(&url).header(reqwest::header::CONTENT_LENGTH, len).body(reqwest::Body::wrap_stream(stream));
     if let Some(u) = &put.user {
         req = req.basic_auth(u, put.pass.as_deref());
     }

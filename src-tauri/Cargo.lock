@@ -339,6 +339,7 @@ dependencies = [
  "russh",
  "russh-sftp",
  "rustls-native-certs",
+ "same-file",
  "serde",
  "serde_json",
  "sha2",

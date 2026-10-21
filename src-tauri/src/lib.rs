@@ -24,9 +24,7 @@ const METRICS_TICK: Duration = Duration::from_millis(500);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    build(tauri::Builder::default())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    build(tauri::Builder::default()).run(tauri::generate_context!()).expect("error while running tauri application");
 }
 
 /// Directory for config + secrets fallback. `ATLAS_CONFIG_DIR` overrides it (portable
@@ -45,12 +43,7 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
-            let cache = ctx
-                .app_handle()
-                .path()
-                .app_cache_dir()
-                .unwrap_or_else(|_| std::env::temp_dir().join("atlas"))
-                .join("thumbs");
+            let cache = ctx.app_handle().path().app_cache_dir().unwrap_or_else(|_| std::env::temp_dir().join("atlas")).join("thumbs");
             let uri = request.uri().to_string();
             tauri::async_runtime::spawn(async move {
                 responder.respond(thumbs::respond(uri, cache).await);
@@ -92,6 +85,9 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::reveal_item,
             commands::frontend_log,
             commands::e2e_dir,
+            commands::upload_begin,
+            commands::upload_chunk,
+            commands::upload_end,
         ])
 }
 
@@ -123,10 +119,10 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
     let on_done: transfer::OnDone = {
         let handle = handle.clone();
         Arc::new(move |job: &transfer::JobSnapshot| {
-            if job.open_after {
-                if let Some(path) = job.outputs.first() {
-                    let _ = handle.opener().open_path(path, None::<&str>);
-                }
+            if job.open_after
+                && let Some(path) = job.outputs.first()
+            {
+                let _ = handle.opener().open_path(path, None::<&str>);
             }
             let _ = handle.emit("transfer-done", job.clone());
         })
@@ -147,6 +143,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
         watcher,
         searches: Default::default(),
         temp_dir,
+        uploads: Default::default(),
     });
 
     // Transfer updates: coalesce many progress ticks into ~8 UI updates/second.
@@ -168,11 +165,11 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
         let handle = handle.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_secs(3)).await;
-            if let Some(w) = handle.get_webview_window("main") {
-                if !w.is_visible().unwrap_or(true) {
-                    eprintln!("[atlas] window was not shown by the UI; showing it");
-                    let _ = w.show();
-                }
+            if let Some(w) = handle.get_webview_window("main")
+                && !w.is_visible().unwrap_or(true)
+            {
+                eprintln!("[atlas] window was not shown by the UI; showing it");
+                let _ = w.show();
             }
         });
     }

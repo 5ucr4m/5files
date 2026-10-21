@@ -230,11 +230,7 @@ async fn sftp_bad_credentials_are_auth_errors() {
     // A key the server doesn't know.
     let dir = tempfile::tempdir().unwrap();
     let kp = dir.path().join("k");
-    let st = std::process::Command::new("ssh-keygen")
-        .args(["-q", "-t", "ed25519", "-N", "", "-f"])
-        .arg(&kp)
-        .status()
-        .unwrap();
+    let st = std::process::Command::new("ssh-keygen").args(["-q", "-t", "ed25519", "-N", "", "-f"]).arg(&kp).status().unwrap();
     assert!(st.success());
     let mut o = sftp_opts();
     o.insert("keyPath".into(), kp.to_string_lossy().into_owned());
@@ -311,9 +307,7 @@ async fn sftp_symlinks_are_followed_for_type() {
     write_file(&p, &p.join(&target, "x.txt"), b"x").await;
     // No symlink API on the trait: create one with the container's shell.
     let link_in_container = format!("/home/atlas{}", p.join(&top, "link"));
-    let st = std::process::Command::new("docker")
-        .args(["exec", "atlas-test-sftp", "ln", "-s", "dir", &link_in_container])
-        .status();
+    let st = std::process::Command::new("docker").args(["exec", "atlas-test-sftp", "ln", "-s", "dir", &link_in_container]).status();
     if !matches!(st, Ok(s) if s.success()) {
         eprintln!("skipping: cannot create a symlink inside the container");
         p.remove(&top).await.unwrap();
@@ -375,10 +369,7 @@ async fn webdav_roundtrip() {
     let _wd = watchdog("webdav_roundtrip", 120);
     let c = conn(
         Kind::Webdav,
-        opts(&[
-            ("url", env_or("ATLAS_WEBDAV_URL", "http://127.0.0.1:28080")),
-            ("username", env_or("ATLAS_WEBDAV_USER", "atlas")),
-        ]),
+        opts(&[("url", env_or("ATLAS_WEBDAV_URL", "http://127.0.0.1:28080")), ("username", env_or("ATLAS_WEBDAV_USER", "atlas"))]),
     );
     let secrets = opts(&[("password", env_or("ATLAS_WEBDAV_PASS", "atlaspass"))]);
     let p = connections::build(&c, &secrets).await.unwrap().provider;

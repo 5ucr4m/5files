@@ -133,7 +133,7 @@ function StatusDot({ c }: { c: Connection }) {
 
 export function Sidebar() {
   const tab = useActiveTab();
-  const { volumes, places, connections } = useDrives();
+  const { volumes, places, connections, roots } = useDrives();
   const favorites = useSettings((s) => s.favorites);
   const width = useSettings((s) => s.sidebarWidth);
 
@@ -234,7 +234,7 @@ export function Sidebar() {
               icon={<Icon size={15} style={{ color: c.color ?? undefined }} />}
               label={c.name}
               active={here && tab?.listing?.crumbs.length === 1}
-              dest={c.status === "connected" ? { fs: c.id, path: "/" } : undefined}
+              dest={c.status === "connected" ? { fs: c.id, path: roots[c.id] ?? "/" } : undefined}
               trailing={<StatusDot c={c} />}
               title={`${KIND_META[c.kind].label}${c.error ? ` — ${c.error}` : ""}`}
               onClick={(e) => void openConnection(c.id, { newTab: e.metaKey || e.ctrlKey })}

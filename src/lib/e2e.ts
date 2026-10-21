@@ -63,6 +63,13 @@ export async function runE2E(dir: string) {
       });
       if (size !== 64) throw new Error(`thumbnail is ${size}px, expected 64`);
     });
+    await step("dropped file streams in through binary IPC chunks", async () => {
+      const bytes = new Uint8Array(5 * 1024 * 1024 + 7).map((_, i) => i % 251);
+      const path = await api().uploadFile("local", dir, new File([bytes], "dropped.bin"));
+      await tabs.refresh(tab().id);
+      const e = tab().listing?.entries.find((x) => x.path === path);
+      if (!e || e.size !== bytes.length) throw new Error(`uploaded size ${e?.size}`);
+    });
     await log("PASS");
   } catch (e) {
     await log(`FAIL ${e instanceof Error ? e.message : String(e)}`);
