@@ -33,7 +33,7 @@ export interface ConflictRequest {
   resolve: (c: Conflict | null) => void;
 }
 
-export type Panel = null | "transfers" | "connections" | "settings";
+export type Panel = null | "transfers" | "connections" | "settings" | "sync";
 
 interface UiState {
   toasts: Toast[];
@@ -44,6 +44,8 @@ interface UiState {
   panel: Panel;
   /** Connection being edited in the connections panel (id), or a kind for a new one. */
   editing: { id?: string; kind?: ConnKind } | null;
+  /** Sync panel: a pair's id, "new", or null for the list. */
+  syncView: string | null;
   quickLook: { fs: FsId; entry: Entry } | null;
   clipboard: { mode: "copy" | "cut"; items: Loc[] } | null;
   dropTarget: string | null;
@@ -64,6 +66,7 @@ export const useUi = create<UiState>((set, get) => ({
   palette: false,
   panel: null,
   editing: null,
+  syncView: null,
   quickLook: null,
   clipboard: null,
   dropTarget: null,

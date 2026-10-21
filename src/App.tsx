@@ -5,6 +5,7 @@ import { ConnectionsPanel } from "./components/Connections";
 import { ConfirmDialog, ConflictDialog, ContextMenu, Modal, Toasts } from "./components/Overlays";
 import { PreviewPane, QuickLook } from "./components/Preview";
 import { SettingsPanel } from "./components/Settings";
+import { SyncPanel } from "./components/Sync";
 import { Sidebar } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
 import { TransferPanel } from "./components/Transfers";
@@ -13,7 +14,7 @@ import { useLayout } from "./store/layout";
 import { api } from "./lib/api";
 import { fsName, plural, transfer } from "./lib/ops";
 import { isMac, isMod } from "./lib/platform";
-import { useDrives, useMetrics, useTransfers } from "./store/live";
+import { useDrives, useMetrics, useSyncs, useTransfers } from "./store/live";
 import { ACCENTS, resolvedTheme, useSettings } from "./store/settings";
 import { activeTab, useActiveTab, useTabs } from "./store/tabs";
 import { toast, useUi } from "./store/ui";
@@ -45,6 +46,7 @@ function useBackendEvents() {
     const subs = [
       a.onTransfers((jobs) => useTransfers.getState().set(jobs)),
       a.onMetrics((m) => useMetrics.getState().push(m)),
+      a.onSyncs((list) => useSyncs.getState().set(list)),
       a.onFsChanged((dirs) => {
         const set = new Set(dirs);
         useTabs.getState().refreshWhere((t) => t.fs === "local" && !t.search && set.has(t.path));
@@ -71,6 +73,7 @@ function useBackendEvents() {
       }),
     ];
     void a.transfers().then((j) => useTransfers.getState().set(j));
+    void a.syncList().then((list) => useSyncs.getState().set(list));
     return () => subs.forEach((p) => p.then((u) => u()));
   }, []);
 
@@ -296,6 +299,9 @@ export default function App() {
         </AnimatePresence>
         <Modal open={panel === "connections"} onClose={closePanel} width={680}>
           <ConnectionsPanel />
+        </Modal>
+        <Modal open={panel === "sync"} onClose={() => useUi.getState().set({ panel: null, syncView: null })} width={720}>
+          <SyncPanel />
         </Modal>
         <Modal open={panel === "settings"} onClose={closePanel} width={520}>
           <SettingsPanel />

@@ -26,6 +26,7 @@ pub struct AppState {
     pub local: DynProvider,
     pub conns: Arc<Connections>,
     pub transfers: Arc<Manager>,
+    pub syncs: Arc<crate::sync::Engine>,
     pub watcher: Watcher,
     /// Cancellable background tasks (searches, folder sizes) by id.
     pub searches: Arc<Mutex<HashMap<String, CancellationToken>>>,
@@ -509,4 +510,38 @@ pub async fn folder_sizes(
         tasks.lock().remove(&tid);
     });
     Ok(id)
+}
+
+// ----------------------------- folder sync -----------------------------
+
+#[tauri::command]
+pub fn sync_list(state: S<'_>) -> Vec<crate::sync::SyncView> {
+    state.syncs.views()
+}
+
+/// Dry run: what a sync with these settings would do right now.
+#[tauri::command]
+pub async fn sync_preview(state: S<'_>, input: crate::sync::SyncInput) -> AppResult<crate::sync::Preview> {
+    state.syncs.preview(&input).await
+}
+
+#[tauri::command]
+pub async fn sync_save(state: S<'_>, input: crate::sync::SyncInput) -> AppResult<crate::sync::SyncPair> {
+    state.syncs.save(input).await
+}
+
+#[tauri::command]
+pub fn sync_delete(state: S<'_>, id: String) -> AppResult<()> {
+    state.syncs.delete(&id)
+}
+
+/// Runs now; `allow_deletes` confirms a run that was held because it deletes a lot.
+#[tauri::command]
+pub fn sync_run(state: S<'_>, id: String, allow_deletes: bool) {
+    state.syncs.run_now(&id, allow_deletes)
+}
+
+#[tauri::command]
+pub fn sync_pause(state: S<'_>, id: String, paused: bool) -> AppResult<()> {
+    state.syncs.set_paused(&id, paused)
 }

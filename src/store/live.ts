@@ -1,7 +1,7 @@
 // Live data pushed by the backend: transfer queue, I/O metrics, drives & connections.
 import { create } from "zustand";
 import { api } from "../lib/api";
-import type { Connection, Job, MetricsSnapshot, Place, Rates, Volume } from "../lib/types";
+import type { Connection, Job, MetricsSnapshot, Place, Rates, SyncPair, Volume } from "../lib/types";
 
 export const HISTORY = 120; // 60 s at 500 ms
 
@@ -68,4 +68,14 @@ export const useDrives = create<DrivesState>((set) => ({
   setRoot: (id, root) => set((s) => ({ roots: { ...s.roots, [id]: root } })),
   setStatus: (id, status, error = null) =>
     set((s) => ({ connections: s.connections.map((c) => (c.id === id ? { ...c, status, error } : c)) })),
+}));
+
+interface SyncsState {
+  syncs: SyncPair[];
+  set: (s: SyncPair[]) => void;
+}
+
+export const useSyncs = create<SyncsState>((set) => ({
+  syncs: [],
+  set: (syncs) => set({ syncs }),
 }));

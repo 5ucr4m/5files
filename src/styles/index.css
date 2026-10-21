@@ -252,3 +252,50 @@ button {
     opacity: 1;
   }
 }
+
+/* Sync flow: dots travelling through the pipe between two folders. */
+.sync-dot {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 999px;
+  box-shadow: 0 0 6px currentColor;
+  animation: sync-flow 1.4s linear infinite;
+}
+.sync-dot-back {
+  animation-name: sync-flow-back;
+}
+.sync-dot-still {
+  animation: none;
+  opacity: 0.35;
+}
+@keyframes sync-flow {
+  from {
+    left: -8%;
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  to {
+    left: 100%;
+    opacity: 0;
+  }
+}
+@keyframes sync-flow-back {
+  from {
+    left: 100%;
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  to {
+    left: -8%;
+    opacity: 0;
+  }
+}

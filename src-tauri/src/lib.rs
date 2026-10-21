@@ -5,6 +5,7 @@ pub mod metrics;
 pub mod oauth;
 pub mod search;
 pub mod sizes;
+pub mod sync;
 pub mod thumbs;
 pub mod transfer;
 pub mod vfs;
@@ -90,6 +91,12 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::upload_chunk,
             commands::upload_end,
             commands::folder_sizes,
+            commands::sync_list,
+            commands::sync_preview,
+            commands::sync_save,
+            commands::sync_delete,
+            commands::sync_run,
+            commands::sync_pause,
         ])
 }
 
@@ -104,7 +111,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
 
     let local: vfs::DynProvider = Arc::new(vfs::local::LocalFs);
     let use_keychain = std::env::var_os("FIVEFILES_NO_KEYCHAIN").is_none();
-    let conns = Arc::new(connections::Connections::load_with(config_dir, use_keychain));
+    let conns = Arc::new(connections::Connections::load_with(config_dir.clone(), use_keychain));
 
     let dirty = Arc::new(AtomicBool::new(true));
     let resolve: transfer::Resolver = {
@@ -140,7 +147,15 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
             let _ = handle.emit("transfer-done", job.clone());
         })
     };
-    let transfers = transfer::Manager::new(3, resolve, notify, on_done);
+    let transfers = transfer::Manager::new(3, resolve.clone(), notify, on_done);
+
+    // Folder syncs: share the drive resolver; push status changes like transfers do.
+    let sync_dirty = Arc::new(AtomicBool::new(true));
+    let syncs = {
+        let d = sync_dirty.clone();
+        sync::Engine::new(config_dir.clone(), resolve, Arc::new(move || d.store(true, Ordering::Relaxed)))
+    };
+    syncs.start();
 
     let watcher = {
         let handle = handle.clone();
@@ -157,6 +172,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
         local,
         conns,
         transfers: transfers.clone(),
+        syncs: syncs.clone(),
         watcher,
         searches: Default::default(),
         sizes,
@@ -173,6 +189,9 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
                 iv.tick().await;
                 if dirty.swap(false, Ordering::Relaxed) {
                     let _ = handle.emit("transfers", transfers.snapshots());
+                }
+                if sync_dirty.swap(false, Ordering::Relaxed) {
+                    let _ = handle.emit("syncs", syncs.views());
                 }
             }
         });

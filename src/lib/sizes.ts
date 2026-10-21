@@ -42,7 +42,8 @@ export function measureFolders(fs: FsId, paths: string[], force = false): () => 
     const k = key(fs, p);
     const running = inflight.get(k);
     mine.push(k);
-    if (running && !running.batch.cancelled) running.refs++;
+    // `force` means "something changed": recount instead of joining an older count.
+    if (running && !running.batch.cancelled && !force) running.refs++;
     else fresh.push(p);
   }
   if (fresh.length) {
@@ -53,8 +54,10 @@ export function measureFolders(fs: FsId, paths: string[], force = false): () => 
       .folderSizes(fs, fresh, force, (e) => {
         if (batch.cancelled) return;
         const k = key(fs, e.path);
+        // Only the newest count of a folder may write (a forced recount supersedes).
+        if (inflight.get(k)?.batch !== batch) return;
         if (e.type !== "error") store.set(fs, e.path, { bytes: e.bytes, files: e.files, done: e.type === "done" });
-        if (e.type !== "progress" && inflight.get(k)?.batch === batch) inflight.delete(k);
+        if (e.type !== "progress") inflight.delete(k);
       })
       .then((taskId) => {
         batch.id = taskId;

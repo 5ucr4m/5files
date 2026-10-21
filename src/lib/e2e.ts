@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { api } from "./api";
 import { newFolder, sendToOtherPane, transfer } from "./ops";
 import { useLayout } from "../store/layout";
-import { useMetrics, useTransfers } from "../store/live";
+import { useMetrics, useSyncs, useTransfers } from "../store/live";
 import { folderSize, useSizes } from "../store/sizes";
 import { measureFolders } from "./sizes";
 import { activeTab, useTabs } from "../store/tabs";
@@ -76,11 +76,17 @@ export async function runE2E(dir: string, home?: string) {
     await step("folder sizes are measured and streamed", async () => {
       const folder = `${dir}${sep}untitled folder`;
       measureFolders("local", [folder], true);
-      const size = await until("folder size", () => {
+      // The store may still hold the earlier count (folder was empty then): wait for the recount.
+      const want = 96 * 1024 * 1024;
+      try {
+        await until("folder size", () => {
+          const s = folderSize(useSizes.getState().sizes, "local", folder);
+          return s?.done && s.bytes === want && s.files === 1;
+        });
+      } catch {
         const s = folderSize(useSizes.getState().sizes, "local", folder);
-        return s?.done ? s : null;
-      });
-      if (size.bytes !== 96 * 1024 * 1024 || size.files !== 1) throw new Error(`measured ${size.bytes} bytes / ${size.files} files`);
+        throw new Error(`measured ${s?.bytes} bytes / ${s?.files} files`);
+      }
     });
     await step("split panes: open, copy to the other pane, close", async () => {
       const L = useLayout.getState();
@@ -96,6 +102,20 @@ export async function runE2E(dir: string, home?: string) {
       await until("copied into the other pane", () => useTabs.getState().tabs.find((t) => t.id === right.id)?.listing?.entries.some((e) => e.name === "pic.png"), 10000);
       useTabs.getState().closeTab(right.id);
       await until("back to one pane", () => document.querySelectorAll("[data-pane-id]").length === 1 && !useTabs.getState().tabs.some((t) => t.id === right.id), 5000);
+    });
+    await step("folder sync: mirror runs through the real engine", async () => {
+      const src = `${dir}${sep}untitled folder`;
+      const dst = `${dir}${sep}sync-dest`;
+      const pair = await api().syncSave({ name: "e2e", source: { fs: "local", path: src }, dest: { fs: "local", path: dst }, mode: "mirror", twoWay: false });
+      const done = await until(
+        "sync finished",
+        () => useSyncs.getState().syncs.find((x) => x.id === pair.id && x.state === "idle" && x.lastRun),
+        30000,
+      );
+      if (!done.lastRun?.ok || done.lastRun.copied < 1) throw new Error(`last run ${JSON.stringify(done.lastRun)}`);
+      const listing = await api().listDir("local", dst);
+      if (!listing.entries.some((e) => e.name === "seed.bin")) throw new Error("seed.bin not mirrored");
+      await api().syncDelete(pair.id);
     });
     if (home) {
       await step(`measures a real folder (${home})`, async () => {

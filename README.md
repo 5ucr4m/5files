@@ -31,6 +31,17 @@ queue with real progress, and a live monitor in the title bar shows how much dis
   (also in the context menu as "Copy to …" / "Move to …"), or drag across
 - Panes spring open from the edge and collapse on close; a light bar glides to the focused pane
 
+**Folder sync** (sidebar → Sync → `+`)
+- Keep two folders in step on any drives (local, S3, Drive, Nextcloud, SFTP, FTP)
+- **Mirror**: the destination becomes an exact copy, deletions included.
+  **Mirror, keep deleted**: everything is copied, nothing is ever deleted from the destination
+- **Sync both ways** (either mode): changes made in the destination flow back to the source; the state
+  after each run is recorded, so a deletion is never mistaken for a new file
+- Review before starting shows exactly what the first sync will do; local deletions go to the Trash;
+  conflicts keep the newest version and save the other as "(conflicted copy …)"
+- A run that would delete a large share of the files (e.g. an unplugged source) is held for review
+- Local folders are watched (syncs ~2 s after changes); remote ones are re-checked every 5 minutes
+
 **Working with files**
 - Copy / cut / paste across tabs **and across drives** (local ⇄ S3 ⇄ SFTP …), duplicate, rename inline (F2)
 - Drag & drop between views, tabs, breadcrumbs and the sidebar (`⌥`/`Ctrl` forces copy), drop files in from the OS
@@ -97,6 +108,7 @@ src-tauri/src
 ├── watcher.rs      folder watching (notify) → refresh events
 ├── search.rs       streaming recursive search
 ├── sizes.rs        folder sizes: parallel walk, streaming, cache + invalidation
+├── sync/           folder sync: plan.rs (pure rules, heavily tested) + engine (scan, run, watch)
 ├── oauth.rs        Google OAuth (loopback + PKCE)
 └── commands.rs     the IPC surface
 

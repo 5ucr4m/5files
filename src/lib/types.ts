@@ -162,3 +162,68 @@ export type SizeEvent =
   | { type: "progress"; path: string; bytes: number; files: number }
   | { type: "done"; path: string; bytes: number; files: number }
   | { type: "error"; path: string; message: string };
+
+export type SyncMode = "mirror" | "keepDeleted";
+export type SyncSide = "source" | "dest";
+
+export interface SyncRun {
+  at: number;
+  ok: boolean;
+  copied: number;
+  deleted: number;
+  conflicts: number;
+  bytes: number;
+  failed: number;
+  error: string | null;
+}
+
+export interface SyncSummary {
+  copies: number;
+  copyBytes: number;
+  toSource: number;
+  deletes: number;
+  deletedFiles: number;
+  conflicts: number;
+  mkdirs: number;
+}
+
+export type SyncState =
+  | { state: "idle" }
+  | { state: "scanning" }
+  | { state: "syncing"; done: number; total: number; bytes: number; totalBytes: number; current: string | null }
+  | { state: "review"; summary: SyncSummary }
+  | { state: "error"; message: string }
+  | { state: "paused" };
+
+export type SyncPair = {
+  id: string;
+  name: string;
+  source: Loc;
+  dest: Loc;
+  mode: SyncMode;
+  twoWay: boolean;
+  paused: boolean;
+  createdAt: number;
+  lastRun: SyncRun | null;
+} & SyncState;
+
+export interface SyncInput {
+  id?: string | null;
+  name: string;
+  source: Loc;
+  dest: Loc;
+  mode: SyncMode;
+  twoWay: boolean;
+}
+
+export type SyncOp =
+  | { op: "mkDir"; to: SyncSide; rel: string }
+  | { op: "copy"; to: SyncSide; rel: string; size: number }
+  | { op: "delete"; on: SyncSide; rel: string }
+  | { op: "conflict"; rel: string; winner: SyncSide; size: number };
+
+export interface SyncPreview {
+  summary: SyncSummary;
+  needsReview: boolean;
+  sample: SyncOp[];
+}

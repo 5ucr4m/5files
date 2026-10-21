@@ -21,7 +21,8 @@ import { canDrop, dropEffect, handleDrop, isInternalDrag } from "../lib/dnd";
 import { formatBytes } from "../lib/format";
 import { openConnection } from "../lib/ops";
 import type { Connection, Loc, Place } from "../lib/types";
-import { useDrives } from "../store/live";
+import { useDrives, useSyncs } from "../store/live";
+import { SyncGlyph, syncStatus } from "./Sync";
 import { useSettings } from "../store/settings";
 import { useActiveTab, useTabs } from "../store/tabs";
 import { confirmDialog, toast, useUi } from "../store/ui";
@@ -134,6 +135,7 @@ function StatusDot({ c }: { c: Connection }) {
 export function Sidebar() {
   const tab = useActiveTab();
   const { volumes, places, connections, roots } = useDrives();
+  const syncs = useSyncs((s) => s.syncs);
   const favorites = useSettings((s) => s.favorites);
   const width = useSettings((s) => s.sidebarWidth);
 
@@ -248,6 +250,55 @@ export function Sidebar() {
             className="mx-1 mt-1 flex w-[calc(100%-8px)] items-center gap-2 rounded-lg border border-dashed border-line-strong px-2.5 py-2 text-left text-2xs text-ink-3 hover:border-accent hover:text-ink-2"
           >
             <Plus size={13} /> Connect S3, Drive, Nextcloud, SFTP or FTP
+          </button>
+        )}
+      </Section>
+
+      <Section
+        title="Sync"
+        action={
+          <button
+            onClick={() => useUi.getState().set({ panel: "sync", syncView: "new" })}
+            className="flex size-5 items-center justify-center rounded-md text-ink-3 hover:bg-surface-3 hover:text-ink"
+            title="Keep two folders in step"
+            aria-label="New sync"
+          >
+            <Plus size={14} />
+          </button>
+        }
+      >
+        {syncs.map((p) => {
+          const st = syncStatus(p);
+          return (
+            <Item
+              key={p.id}
+              icon={<SyncGlyph pair={p} size={15} />}
+              label={p.name}
+              title={`${p.source.path} ${p.twoWay ? "⇄" : "→"} ${p.dest.path}\n${st.text}`}
+              onClick={() => useUi.getState().set({ panel: "sync", syncView: p.id })}
+              below={
+                <span className="block truncate text-[10.5px]" style={{ color: st.tone === "error" ? "var(--danger)" : st.tone === "warn" ? "var(--warning)" : "var(--ink-4)" }}>
+                  {p.state === "syncing" ? `${Math.round((p.done / Math.max(1, p.total)) * 100)}% · ${p.current ?? ""}` : st.text}
+                </span>
+              }
+              onContextMenu={(e) => {
+                e.preventDefault();
+                useUi.getState().openMenu(e.clientX, e.clientY, [
+                  { label: "Sync now", run: () => void api().syncRun(p.id, false) },
+                  { label: p.paused ? "Resume" : "Pause", run: () => void api().syncPause(p.id, !p.paused) },
+                  { divider: true },
+                  { label: "Show details…", run: () => useUi.getState().set({ panel: "sync", syncView: p.id }) },
+                ]);
+              }}
+            />
+          );
+        })}
+        {syncs.length === 0 && (
+          <button
+            onClick={() => useUi.getState().set({ panel: "sync", syncView: "new" })}
+            className="mx-1 mt-1 flex w-[calc(100%-8px)] items-center gap-2 rounded-lg border border-dashed border-line-strong px-2.5 py-2 text-left text-2xs text-ink-3 hover:border-accent hover:text-ink-2"
+          >
+            <Plus size={13} /> Keep two folders in step, on any drive
           </button>
         )}
       </Section>

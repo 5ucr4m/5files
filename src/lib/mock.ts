@@ -1,7 +1,7 @@
 // In-memory backend used when running in a plain browser (vite dev) and in tests.
 // Simulates a home folder, two remote drives, the transfer queue and I/O metrics.
 import type { Backend, Unlisten } from "./api";
-import type { Connection, Entry, FsId, Job, JobRequest, MetricsSnapshot, Rates } from "./types";
+import type { Connection, Entry, FsId, Job, JobRequest, MetricsSnapshot, Rates, SyncPair } from "./types";
 
 interface Node {
   name: string;
@@ -156,6 +156,37 @@ function emitter<T>() {
 }
 
 export function createMockBackend(): Backend {
+  const syncs: SyncPair[] = [
+    {
+      id: "s1",
+      name: "Photos backup",
+      source: { fs: "local", path: "/Users/demo/Pictures" },
+      dest: { fs: "c-s3", path: "/media" },
+      mode: "keepDeleted",
+      twoWay: false,
+      paused: false,
+      createdAt: Date.now() - 5 * DAY,
+      lastRun: { at: Date.now() - 4 * 60_000, ok: true, copied: 3, deleted: 0, conflicts: 0, bytes: 12_400_000, failed: 0, error: null },
+      state: "idle",
+    },
+  ];
+  const syncEv = emitter<SyncPair[]>();
+  const pushSyncs = () => syncEv.emit(syncs.map((x) => ({ ...x })));
+  const fakeRun = (id: string) => {
+    const x = syncs.find((y) => y.id === id);
+    if (!x || x.paused) return;
+    let done = 0;
+    const total = 24;
+    const iv = setInterval(() => {
+      done += 2;
+      Object.assign(x, { state: "syncing", done, total, bytes: done * 2_000_000, totalBytes: total * 2_000_000, current: `IMG_${2400 + done}.jpg` });
+      if (done >= total) {
+        clearInterval(iv);
+        Object.assign(x, { state: "idle", lastRun: { at: Date.now(), ok: true, copied: total, deleted: 0, conflicts: 0, bytes: total * 2_000_000, failed: 0, error: null } });
+      }
+      pushSyncs();
+    }, 250);
+  };
   const jobs: Job[] = [];
   const paused = new Set<string>();
   const cancelled = new Set<string>();
@@ -500,6 +531,47 @@ export function createMockBackend(): Backend {
       return join(dir, name);
     },
     async reveal() {},
+    async syncList() {
+      return syncs.map((x) => ({ ...x }));
+    },
+    async syncPreview(input) {
+      await delay(null, 500);
+      const n = treeBytes(lookup(input.source.fs, input.source.path));
+      return {
+        summary: { copies: 18, copyBytes: n, toSource: input.twoWay ? 2 : 0, deletes: input.mode === "mirror" ? 3 : 0, deletedFiles: input.mode === "mirror" ? 3 : 0, conflicts: 0, mkdirs: 2 },
+        needsReview: false,
+        sample: [
+          { op: "copy", to: "dest", rel: "Trips/IMG_2401.jpg", size: 3_200_000 },
+          { op: "copy", to: "dest", rel: "IMG_2412.jpg", size: 4_900_000 },
+          ...(input.mode === "mirror" ? [{ op: "delete" as const, on: "dest" as const, rel: "old-export.zip" }] : []),
+        ],
+      };
+    },
+    async syncSave(input) {
+      let x = syncs.find((y) => y.id === input.id);
+      if (x) Object.assign(x, { ...input });
+      else {
+        x = { ...input, id: `s${Date.now()}`, paused: false, createdAt: Date.now(), lastRun: null, state: "scanning" } as SyncPair;
+        syncs.push(x);
+      }
+      pushSyncs();
+      setTimeout(() => fakeRun(x!.id), 400);
+      return { ...x };
+    },
+    async syncDelete(id) {
+      const i = syncs.findIndex((y) => y.id === id);
+      if (i >= 0) syncs.splice(i, 1);
+      pushSyncs();
+    },
+    async syncRun(id) {
+      fakeRun(id);
+    },
+    async syncPause(id, paused) {
+      const x = syncs.find((y) => y.id === id);
+      if (x) Object.assign(x, { paused, state: paused ? "paused" : "idle" });
+      pushSyncs();
+    },
+    onSyncs: (cb) => syncEv.on(cb),
     fileUrl: (path) => svgPlaceholder(path, 1200),
     thumbUrl: (path, size) => svgPlaceholder(path, size),
     onTransfers: (cb) => transfersEv.on(cb),

@@ -44,6 +44,17 @@ describe("measureFolders", () => {
     again();
   });
 
+  it("a forced recount supersedes an older count of the same folder", async () => {
+    const { useSizes, folderSize } = await import("../store/sizes");
+    measureFolders("local", ["/f"]); // started while the folder was empty
+    measureFolders("local", ["/f"], true); // "Calculate size" after files arrived
+    await vi.runAllTimersAsync();
+    expect(calls).toHaveLength(2);
+    calls[1].emit({ type: "done", path: "/f", bytes: 500, files: 2 });
+    calls[0].emit({ type: "done", path: "/f", bytes: 0, files: 0 }); // stale result arrives late
+    expect(folderSize(useSizes.getState().sizes, "local", "/f")).toEqual({ bytes: 500, files: 2, done: true });
+  });
+
   it("finished folders are measured again on the next request", async () => {
     measureFolders("local", ["/x"]);
     await vi.runAllTimersAsync();

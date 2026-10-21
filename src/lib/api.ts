@@ -13,6 +13,9 @@ import type {
   Platform,
   SearchEvent,
   SizeEvent,
+  SyncInput,
+  SyncPair,
+  SyncPreview,
   TextPreview,
   Volume,
 } from "./types";
@@ -57,6 +60,13 @@ export interface Backend {
   /** Streams a browser File (OS drop without a path, i.e. Windows) into `dir`; returns the new path. */
   uploadFile(fs: FsId, dir: string, file: File, onProgress?: (done: number) => void): Promise<string>;
   reveal(path: string): Promise<void>;
+  syncList(): Promise<SyncPair[]>;
+  syncPreview(input: SyncInput): Promise<SyncPreview>;
+  syncSave(input: SyncInput): Promise<SyncPair>;
+  syncDelete(id: string): Promise<void>;
+  syncRun(id: string, allowDeletes: boolean): Promise<void>;
+  syncPause(id: string, paused: boolean): Promise<void>;
+  onSyncs(cb: (syncs: SyncPair[]) => void): Promise<Unlisten>;
   /** URL the <img>/<video> tags can load for a local file. */
   fileUrl(path: string): string;
   thumbUrl(path: string, size: number): string;
@@ -142,6 +152,13 @@ async function tauriBackend(): Promise<Backend> {
       return invoke<string>("upload_end", { id, cancel: false });
     },
     reveal: (path) => invoke("reveal_item", { path }),
+    syncList: () => invoke("sync_list"),
+    syncPreview: (input) => invoke("sync_preview", { input }),
+    syncSave: (input) => invoke("sync_save", { input }),
+    syncDelete: (id) => invoke("sync_delete", { id }),
+    syncRun: (id, allowDeletes) => invoke("sync_run", { id, allowDeletes }),
+    syncPause: (id, paused) => invoke("sync_pause", { id, paused }),
+    onSyncs: (cb) => listen<SyncPair[]>("syncs", (e) => cb(e.payload)),
     fileUrl: (path) => convertFileSrc(path),
     thumbUrl: (path, size) => `${convertFileSrc(path, "thumb")}?s=${size}`,
     onTransfers: (cb) => listen<Job[]>("transfers", (e) => cb(e.payload)),
