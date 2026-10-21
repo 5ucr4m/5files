@@ -47,6 +47,9 @@ interface DrivesState {
   connections: Connection[];
   /** Start folder of each connected drive (SFTP opens the user's home, not "/"). */
   roots: Record<string, string>;
+  /** Mount points being ejected right now. */
+  ejecting: string[];
+  setEjecting: (mount: string, on: boolean) => void;
   refreshVolumes: () => Promise<void>;
   refreshConnections: () => Promise<void>;
   setStatus: (id: string, status: Connection["status"], error?: string | null) => void;
@@ -58,6 +61,8 @@ export const useDrives = create<DrivesState>((set) => ({
   places: [],
   connections: [],
   roots: {},
+  ejecting: [],
+  setEjecting: (mount, on) => set((s) => ({ ejecting: on ? [...s.ejecting, mount] : s.ejecting.filter((m) => m !== mount) })),
   async refreshVolumes() {
     const [volumes, places] = await Promise.all([api().volumes(), api().places()]);
     set({ volumes, places });

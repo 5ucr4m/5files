@@ -44,6 +44,20 @@ impl Watcher {
         Self { inner: Mutex::new(debouncer), watched }
     }
 
+    /// Stops watching everything on a volume (open handles would block ejecting it).
+    pub fn release_under(&self, mount: &str) {
+        let m = mount.trim_end_matches(['/', '\\']).to_lowercase();
+        let inside = |p: &std::path::Path| {
+            let s = p.to_string_lossy().to_lowercase();
+            s == m || s.starts_with(&format!("{m}/")) || s.starts_with(&format!("{m}\\"))
+        };
+        let gone: Vec<PathBuf> = self.watched.lock().keys().filter(|p| inside(p)).cloned().collect();
+        let keep: Vec<String> = self.watched.lock().keys().filter(|p| !inside(p)).map(|p| p.to_string_lossy().into_owned()).collect();
+        if !gone.is_empty() {
+            self.set(keep);
+        }
+    }
+
     /// Replaces the watched set with `paths` (non-recursive).
     pub fn set(&self, paths: Vec<String>) {
         let next: HashSet<PathBuf> = paths.into_iter().map(PathBuf::from).filter(|p| p.is_dir()).collect();

@@ -97,6 +97,7 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::sync_delete,
             commands::sync_run,
             commands::sync_pause,
+            commands::eject_volume,
         ])
 }
 

@@ -286,6 +286,15 @@ impl Engine {
         (self.notify)();
     }
 
+    /// Whether a sync is running right now on a folder of `fs` matched by `on`.
+    pub fn busy_on(&self, fs: &str, on: &dyn Fn(&str) -> bool) -> bool {
+        let running = self.running.lock();
+        self.pairs
+            .lock()
+            .iter()
+            .any(|p| running.contains(&p.id) && ((p.source.fs == fs && on(&p.source.path)) || (p.dest.fs == fs && on(&p.dest.path))))
+    }
+
     pub fn get(&self, id: &str) -> Option<SyncPair> {
         self.pairs.lock().iter().find(|p| p.id == id).cloned()
     }

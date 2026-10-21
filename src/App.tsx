@@ -12,7 +12,7 @@ import { TransferPanel } from "./components/Transfers";
 import { PrefixHud, Workspace } from "./components/Workspace";
 import { useLayout } from "./store/layout";
 import { api } from "./lib/api";
-import { fsName, plural, transfer } from "./lib/ops";
+import { ejectVolume, fsName, onVolume, plural, transfer } from "./lib/ops";
 import { isMac, isMod } from "./lib/platform";
 import { useDrives, useMetrics, useSyncs, useTransfers } from "./store/live";
 import { ACCENTS, resolvedTheme, useSettings } from "./store/settings";
@@ -179,6 +179,11 @@ function useShortcuts() {
       }
       if (mod && !e.shiftKey && e.key === "1") return stop(), t && tabs.patch(t.id, { view: "list" });
       if (mod && !e.shiftKey && e.key === "2") return stop(), t && tabs.patch(t.id, { view: "grid" });
+      if (mod && k === "e" && !e.shiftKey && t?.fs === "local") {
+        // Eject the drive the focused pane is on (like Finder's ⌘E).
+        const v = useDrives.getState().volumes.filter((x) => x.ejectable && onVolume(t.path, x.mount)).sort((a, b) => b.mount.length - a.mount.length)[0];
+        if (v) return stop(), void ejectVolume(v);
+      }
       if (mod && k === "l") return stop(), window.dispatchEvent(new Event("5files:edit-path"));
       if (mod && k === "f") return stop(), window.dispatchEvent(new Event("5files:focus-search"));
       if (mod && e.key === ",") return stop(), ui.set({ panel: ui.panel === "settings" ? null : "settings" });

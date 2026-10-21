@@ -545,3 +545,29 @@ pub fn sync_run(state: S<'_>, id: String, allow_deletes: bool) {
 pub fn sync_pause(state: S<'_>, id: String, paused: bool) -> AppResult<()> {
     state.syncs.set_paused(&id, paused)
 }
+
+/// Ejects a removable volume. Refuses while a transfer or sync is using it.
+#[tauri::command]
+pub async fn eject_volume(state: S<'_>, mount: String) -> AppResult<()> {
+    let vol = volumes::list().into_iter().find(|v| v.mount == mount).ok_or_else(|| AppError::NotFound(format!("no drive at {mount}")))?;
+    if !vol.ejectable {
+        return Err(AppError::Invalid(format!("{} can't be ejected", vol.name)));
+    }
+    let on_it = |p: &str| {
+        let (p, m) = (p.to_lowercase(), mount.trim_end_matches(['/', '\\']).to_lowercase());
+        p == m || p.starts_with(&format!("{m}/")) || p.starts_with(&format!("{m}\\"))
+    };
+    let busy_transfer = state.transfers.snapshots().iter().any(|j| {
+        !j.status.is_final()
+            && (j.sources.iter().any(|s| s.fs == "local" && on_it(&s.path))
+                || j.dest.as_ref().is_some_and(|d| d.fs == "local" && on_it(&d.path)))
+    });
+    if busy_transfer {
+        return Err(AppError::Invalid(format!("A transfer is using {}. Wait for it to finish or cancel it first.", vol.name)));
+    }
+    if state.syncs.busy_on("local", &on_it) {
+        return Err(AppError::Invalid(format!("A sync is running on {}. Pause it first.", vol.name)));
+    }
+    state.watcher.release_under(&mount);
+    volumes::eject(&vol.mount, &vol.device).await.map_err(|e| AppError::Other(format!("Couldn't eject {}: {e}", vol.name)))
+}

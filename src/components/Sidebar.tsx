@@ -5,6 +5,7 @@ import {
   HardDrive,
   Home,
   Image,
+  Loader2,
   Monitor,
   Music2,
   Plus,
@@ -14,12 +15,13 @@ import {
   Video,
   type LucideIcon,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useState, type DragEvent, type ReactNode } from "react";
 import { api } from "../lib/api";
 import { canDrop, dropEffect, handleDrop, isInternalDrag } from "../lib/dnd";
 import { formatBytes } from "../lib/format";
-import { openConnection } from "../lib/ops";
+import { ejectVolume, openConnection } from "../lib/ops";
+import { isMac, kbd } from "../lib/platform";
 import type { Connection, Loc, Place } from "../lib/types";
 import { useDrives, useSyncs } from "../store/live";
 import { SyncGlyph, syncStatus } from "./Sync";
@@ -108,6 +110,44 @@ function Item({ icon, label, active, dest, trailing, below, onClick, onContextMe
   );
 }
 
+const revealName = () => (isMac() ? "Reveal in Finder" : document.documentElement.dataset.os === "windows" ? "Show in Explorer" : "Show in file manager");
+
+/** ⏏ — the eject glyph, drawn so it matches the stroke icons around it. */
+function EjectGlyph({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
+      <path d="M8 2.6 13.2 9H2.8Z" fill="currentColor" />
+      <rect x="2.8" y="11" width="10.4" height="2.2" rx="1.1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function EjectButton({ name, busy, onEject }: { name: string; busy: boolean; onEject: () => void }) {
+  // A span, not a button: it sits inside the sidebar item's button.
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={`Eject ${name}`}
+      title={`Eject “${name}” (${kbd("Mod+E")})`}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!busy) onEject();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!busy) onEject();
+        }
+      }}
+      className="flex size-[22px] shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+    >
+      {busy ? <Loader2 size={13} className="animate-spin" /> : <EjectGlyph />}
+    </span>
+  );
+}
+
 function Usage({ total, free }: { total: number; free: number }) {
   const used = total > 0 ? (total - free) / total : 0;
   const tone = used > 0.92 ? "var(--danger)" : used > 0.8 ? "var(--warning)" : "var(--accent)";
@@ -136,6 +176,7 @@ export function Sidebar() {
   const tab = useActiveTab();
   const { volumes, places, connections, roots } = useDrives();
   const syncs = useSyncs((s) => s.syncs);
+  const ejecting = useDrives((s) => s.ejecting);
   const favorites = useSettings((s) => s.favorites);
   const width = useSettings((s) => s.sidebarWidth);
 
@@ -207,11 +248,43 @@ export function Sidebar() {
       )}
 
       <Section title="Drives">
-        {volumes.map((v) => {
-          const loc = { fs: "local", path: v.mount };
-          const Icon = v.removable ? Usb : HardDrive;
-          return <Item key={v.mount} icon={<Icon size={15} />} label={v.name} active={isHere(loc)} dest={loc} onClick={(e) => go(loc, e)} below={<Usage total={v.total} free={v.free} />} title={v.mount} />;
-        })}
+        <AnimatePresence initial={false}>
+          {volumes.map((v) => {
+            const loc = { fs: "local", path: v.mount };
+            const Icon = v.removable ? Usb : HardDrive;
+            const isEjecting = ejecting.includes(v.mount);
+            return (
+              <motion.div
+                key={v.mount}
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: isEjecting ? 0.55 : 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0, x: -12, transition: { duration: 0.25 } }}
+                className="overflow-hidden"
+              >
+                <Item
+                  icon={<Icon size={15} />}
+                  label={v.name}
+                  active={isHere(loc)}
+                  dest={loc}
+                  onClick={(e) => go(loc, e)}
+                  below={<Usage total={v.total} free={v.free} />}
+                  title={v.mount}
+                  trailing={v.ejectable ? <EjectButton name={v.name} busy={isEjecting} onEject={() => void ejectVolume(v)} /> : undefined}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    useUi.getState().openMenu(e.clientX, e.clientY, [
+                      { label: "Open", run: () => void go(loc, e) },
+                      { label: "Open in new tab", run: () => useTabs.getState().newTab(loc) },
+                      { label: revealName(), run: () => void api().reveal(v.mount) },
+                      ...(v.ejectable ? [{ divider: true }, { label: `Eject “${v.name}”`, shortcut: kbd("Mod+E"), run: () => void ejectVolume(v) }] : []),
+                    ]);
+                  }}
+                />
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
       </Section>
 
       <Section

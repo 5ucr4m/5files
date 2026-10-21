@@ -14,6 +14,11 @@ pub struct Volume {
     pub removable: bool,
     pub fs_type: String,
     pub is_root: bool,
+    /// Can be ejected / safely removed from the sidebar.
+    pub ejectable: bool,
+    /// OS device (e.g. /dev/sdb1) — needed to eject on Linux.
+    #[serde(skip)]
+    pub device: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -80,13 +85,17 @@ pub fn list() -> Vec<Volume> {
             let is_root = mount == "/" || (cfg!(windows) && mount.eq_ignore_ascii_case(&windows_system_drive()));
             let raw_name = d.name().to_string_lossy().into_owned();
             let name = if !raw_name.is_empty() && !raw_name.starts_with("/dev/") {
-                if cfg!(windows) { format!("{raw_name} ({})", mount.trim_end_matches('\\')) } else { raw_name }
+                if cfg!(windows) { format!("{raw_name} ({})", mount.trim_end_matches('\\')) } else { raw_name.clone() }
             } else if mount == "/" {
                 "System".into()
             } else {
                 std::path::Path::new(&mount).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| mount.clone())
             };
+            let removable = d.is_removable();
+            let ejectable = !is_root && is_ejectable(os, &mount, removable);
             Some(Volume {
+                ejectable,
+                device: raw_name.clone(),
                 name,
                 mount,
                 total: d.total_space(),
@@ -96,7 +105,7 @@ pub fn list() -> Vec<Volume> {
                     DiskKind::HDD => "hdd",
                     _ => "unknown",
                 },
-                removable: d.is_removable(),
+                removable,
                 fs_type,
                 is_root,
             })
@@ -106,6 +115,62 @@ pub fn list() -> Vec<Volume> {
     out.sort_by(|a, b| b.is_root.cmp(&a.is_root).then(a.mount.cmp(&b.mount)));
     out.dedup_by(|a, b| a.mount == b.mount);
     out
+}
+
+/// External disks, SD cards and mounted disk images — but never the system volume.
+pub fn is_ejectable(os: &str, mount: &str, removable: bool) -> bool {
+    match os {
+        // Everything under /Volumes is an attached disk or image (the system disk is "/").
+        "macos" => mount.starts_with("/Volumes/"),
+        "linux" => removable || mount.starts_with("/media/") || mount.starts_with("/run/media/"),
+        _ => removable,
+    }
+}
+
+/// Ejects (unmounts and, where possible, powers off) the volume mounted at `mount`.
+pub async fn eject(mount: &str, device: &str) -> Result<(), String> {
+    use tokio::process::Command;
+    async fn run(cmd: &mut Command) -> Result<(), String> {
+        let out = cmd.output().await.map_err(|e| e.to_string())?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let msg = if msg.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { msg };
+            Err(if msg.is_empty() { format!("exit status {}", out.status) } else { msg })
+        }
+    }
+    let _ = device;
+    #[cfg(target_os = "macos")]
+    {
+        run(Command::new("diskutil").arg("eject").arg(mount)).await
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Desktop sessions: gio does the right thing (unmount + power off).
+        if run(Command::new("gio").args(["mount", "--eject"]).arg(mount)).await.is_ok() {
+            return Ok(());
+        }
+        run(Command::new("udisksctl").args(["unmount", "-b", device])).await?;
+        // Power-off is best effort (not every device supports it).
+        let parent = device.trim_end_matches(|c: char| c.is_ascii_digit()).trim_end_matches('p');
+        let _ = run(Command::new("udisksctl").args(["power-off", "-b", parent])).await;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        // The same "Eject" Explorer offers; it reports nothing, so verify afterwards.
+        let drive = mount.trim_end_matches('\\');
+        let script = format!("(New-Object -ComObject Shell.Application).Namespace(17).ParseName('{drive}').InvokeVerb('Eject')");
+        run(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])).await?;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            if !std::path::Path::new(mount).exists() {
+                return Ok(());
+            }
+        }
+        Err("Windows didn't eject the drive. Close any app using it and try again.".into())
+    }
 }
 
 fn windows_system_drive() -> String {
@@ -145,6 +210,29 @@ mod tests {
         assert!(!is_user_visible("linux", "/run/user/1000", "tmpfs"));
         assert!(!is_user_visible("linux", "/boot/efi", "vfat"));
         assert!(is_user_visible("windows", "D:\\", "NTFS"));
+    }
+
+    /// Mount a scratch volume at FIVEFILES_EJECT_TEST (e.g. a disk image), then:
+    /// `cargo test --lib eject_real -- --ignored`
+    #[tokio::test]
+    #[ignore]
+    async fn eject_real_volume() {
+        let mount = std::env::var("FIVEFILES_EJECT_TEST").expect("set FIVEFILES_EJECT_TEST");
+        let v = list().into_iter().find(|v| v.mount == mount).expect("volume listed");
+        assert!(v.ejectable, "{v:?}");
+        eject(&v.mount, &v.device).await.expect("eject");
+        assert!(!std::path::Path::new(&mount).exists(), "still mounted");
+        assert!(!list().iter().any(|v| v.mount == mount));
+    }
+
+    #[test]
+    fn ejectable_volumes() {
+        assert!(is_ejectable("macos", "/Volumes/USB", false));
+        assert!(!is_ejectable("macos", "/", false));
+        assert!(is_ejectable("linux", "/media/ana/SD", false));
+        assert!(!is_ejectable("linux", "/home", false));
+        assert!(is_ejectable("windows", "E:\\", true));
+        assert!(!is_ejectable("windows", "D:\\", false));
     }
 
     #[test]

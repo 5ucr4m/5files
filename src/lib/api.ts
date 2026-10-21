@@ -42,6 +42,8 @@ export interface Backend {
   readDataUrl(fs: FsId, path: string): Promise<string>;
   dirSize(fs: FsId, path: string): Promise<DirSize>;
   volumes(): Promise<Volume[]>;
+  /** Ejects a removable volume by its mount point. */
+  eject(mount: string): Promise<void>;
   places(): Promise<Place[]>;
   platform(): Promise<Platform>;
   connections(): Promise<Connection[]>;
@@ -114,6 +116,7 @@ async function tauriBackend(): Promise<Backend> {
     readDataUrl: (fs, path) => invoke("read_data_url", { fs, path }),
     dirSize: (fs, path) => invoke("dir_size", { fs, path }),
     volumes: () => invoke("get_volumes"),
+    eject: (mount) => invoke("eject_volume", { mount }),
     places: () => invoke("get_places"),
     platform: () => invoke("platform"),
     connections: () => invoke("connections_list"),

@@ -1,7 +1,7 @@
 // User-level file operations. Everything long-running goes through the transfer queue.
 import { api, errorKind, errorMessage } from "./api";
 import { formatBytes, freshName } from "./format";
-import type { Entry, FsId, JobKind, Loc } from "./types";
+import type { Entry, FsId, JobKind, Loc, Volume } from "./types";
 import { activeTab, useTabs, type Tab } from "../store/tabs";
 import { confirmDialog, conflictDialog, toast, useUi } from "../store/ui";
 import { useSettings } from "../store/settings";
@@ -216,4 +216,33 @@ export async function sendToOtherPane(tab: Tab, kind: "copy" | "move") {
     return;
   }
   await transfer(kind, items.map((e) => ({ fs: tab.fs, path: e.path })), { fs: dest.fs, path: dest.path });
+}
+
+const ejecting = new Set<string>();
+
+/** True for a path on the volume mounted at `mount` (boundary-aware, case-insensitive). */
+export function onVolume(path: string, mount: string) {
+  const m = mount.replace(/[\\/]+$/, "").toLowerCase();
+  const p = path.toLowerCase();
+  return m === "" || p === m || p.startsWith(m + "/") || p.startsWith(m + "\\");
+}
+
+/** Ejects a removable drive: moves panes off it, ejects, refreshes the drive list. */
+export async function ejectVolume(v: Volume) {
+  if (ejecting.has(v.mount)) return;
+  ejecting.add(v.mount);
+  useDrives.getState().setEjecting(v.mount, true);
+  try {
+    // Panes showing the drive go Home first, so nothing in 5files keeps it busy.
+    const tabs = useTabs.getState();
+    await Promise.all(tabs.tabs.filter((t) => t.fs === "local" && onVolume(t.path, v.mount)).map((t) => tabs.navigate(t.id, { fs: "local", path: "" })));
+    await api().eject(v.mount);
+    await useDrives.getState().refreshVolumes();
+    toast({ tone: "success", title: `“${v.name}” can be safely removed` });
+  } catch (e) {
+    toast({ tone: "error", title: `Couldn't eject “${v.name}”`, body: errorMessage(e) });
+  } finally {
+    ejecting.delete(v.mount);
+    useDrives.getState().setEjecting(v.mount, false);
+  }
 }

@@ -1,7 +1,7 @@
 // In-memory backend used when running in a plain browser (vite dev) and in tests.
 // Simulates a home folder, two remote drives, the transfer queue and I/O metrics.
 import type { Backend, Unlisten } from "./api";
-import type { Connection, Entry, FsId, Job, JobRequest, MetricsSnapshot, Rates, SyncPair } from "./types";
+import type { Connection, Entry, FsId, Job, JobRequest, MetricsSnapshot, Rates, SyncPair, Volume } from "./types";
 
 interface Node {
   name: string;
@@ -156,6 +156,10 @@ function emitter<T>() {
 }
 
 export function createMockBackend(): Backend {
+  const volumesList: Volume[] = [
+    { name: "Macintosh HD", mount: "/", total: 494e9, free: 182e9, kind: "ssd", removable: false, fsType: "apfs", isRoot: true, ejectable: false },
+    { name: "Backup", mount: "/Volumes/Backup", total: 2e12, free: 1.42e12, kind: "hdd", removable: true, fsType: "exfat", isRoot: false, ejectable: true },
+  ];
   const syncs: SyncPair[] = [
     {
       id: "s1",
@@ -425,10 +429,12 @@ export function createMockBackend(): Backend {
       return delay({ bytes: treeBytes(n), files, dirs }, 300);
     },
     async volumes() {
-      return [
-        { name: "Macintosh HD", mount: "/", total: 494e9, free: 182e9, kind: "ssd", removable: false, fsType: "apfs", isRoot: true },
-        { name: "Backup", mount: "/Volumes/Backup", total: 2e12, free: 1.42e12, kind: "hdd", removable: true, fsType: "exfat", isRoot: false },
-      ];
+      return volumesList.map((v) => ({ ...v }));
+    },
+    async eject(mount) {
+      await delay(null, 900);
+      const i = volumesList.findIndex((v) => v.mount === mount);
+      if (i >= 0) volumesList.splice(i, 1);
     },
     async places() {
       return [

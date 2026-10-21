@@ -97,6 +97,8 @@ export interface Volume {
   removable: boolean;
   fsType: string;
   isRoot: boolean;
+  /** Can be ejected / safely removed (external disks, SD cards, disk images). */
+  ejectable: boolean;
 }
 
 export interface Place {
