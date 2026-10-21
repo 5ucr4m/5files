@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+      - name: Frontend typecheck & tests
+        run: |
+          pnpm typecheck
+          pnpm test
+      - name: Build frontend
+        run: pnpm build
+      - name: Rust tests (unit + IPC end-to-end)
+        working-directory: src-tauri
+        env:
+          ATLAS_NO_KEYCHAIN: "1"
+        run: cargo test --locked
+
+  remote-integration:
+    name: Remote providers (Docker)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Start SFTP / FTP / S3 / WebDAV servers
+        run: sh src-tauri/tests/docker/up.sh
+      - name: Run integration tests
+        working-directory: src-tauri
+        run: cargo test --locked --test remote_providers -- --ignored --test-threads=1
+      - if: always()
+        run: sh src-tauri/tests/docker/down.sh
+
+  bundle:
+    name: Bundle (${{ matrix.platform }})
+    needs: test
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+          - platform: windows-latest
+            args: ""
+          - platform: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        with:
+          args: ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atlas-${{ matrix.platform }}
+          path: |
+            src-tauri/target/**/release/bundle/**/*.dmg
+            src-tauri/target/**/release/bundle/**/*.msi
+            src-tauri/target/**/release/bundle/**/*.exe
+            src-tauri/target/**/release/bundle/**/*.deb
+            src-tauri/target/**/release/bundle/**/*.AppImage
+            src-tauri/target/**/release/bundle/**/*.rpm
+          if-no-files-found: ignore

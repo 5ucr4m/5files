@@ -231,7 +231,8 @@ impl Manager {
         }
         (self.notify)();
         let me = self.clone();
-        tokio::spawn(async move { me.run(job).await });
+        // Commands may call this from the main thread (no Tokio context): use Tauri's runtime.
+        tauri::async_runtime::spawn(async move { me.run(job).await });
         Ok(id)
     }
 

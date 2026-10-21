@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 const KEYRING_SERVICE: &str = "dev.atlas.files";
+/// Upper bound for connecting + listing the start folder.
+pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 pub type Opts = HashMap<String, String>;
 
@@ -242,12 +244,20 @@ impl Connections {
         if input.name.trim().is_empty() {
             return Err(AppError::Invalid("name is required".into()));
         }
-        let (opts, new_secrets) = split_secrets(&input.kind, input.options);
+        let (mut opts, new_secrets) = split_secrets(&input.kind, input.options);
         let id = input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let mut secrets = self.secrets.load(&id);
         secrets.extend(new_secrets);
         let in_keychain = self.secrets.save(&id, &secrets)?;
         let existing = self.get(&id);
+        // A trusted SSH host key belongs to a host:port; pointing the connection
+        // elsewhere must not carry it over (it would wrongly report a mismatch).
+        if let Some(prev) = &existing {
+            let moved = ["host", "port"].iter().any(|k| prev.options.get(*k) != opts.get(*k));
+            if moved {
+                opts.remove("hostKey");
+            }
+        }
         let conn = Connection {
             id: id.clone(),
             name: input.name.trim().to_string(),
@@ -313,15 +323,20 @@ impl Connections {
         let conn = self.get(id).ok_or_else(|| AppError::NotFound(format!("connection {id}")))?;
         self.state.write().insert(id.into(), (Status::Connecting, None));
         let secrets = self.secrets.load(id);
-        match build(&conn, &secrets).await {
+        let attempt = async {
+            let built = build(&conn, &secrets).await?;
+            // Probe so bad credentials / unreachable hosts surface on connect.
+            built.provider.list(&built.provider.root()).await?;
+            Ok::<_, AppError>(built)
+        };
+        let result = match tokio::time::timeout(CONNECT_TIMEOUT, attempt).await {
+            Ok(r) => r,
+            Err(_) => Err(AppError::Connection(format!("no answer after {}s — check the host and port", CONNECT_TIMEOUT.as_secs()))),
+        };
+        match result {
             Ok(built) => {
                 if let Some(fp) = built.learned_host_key {
                     self.set_option(id, "hostKey", fp)?;
-                }
-                // Re-mount through a probe so bad credentials surface on connect.
-                if let Err(e) = built.provider.list(&built.provider.root()).await {
-                    self.state.write().insert(id.into(), (Status::Error, Some(e.to_string())));
-                    return Err(e);
                 }
                 self.mounted.write().insert(id.into(), built.provider.clone());
                 self.state.write().insert(id.into(), (Status::Connected, None));
@@ -431,6 +446,8 @@ pub async fn build(conn: &Connection, secrets: &Opts) -> AppResult<Built> {
             let scheme = if opt(o, "secure") == Some("true") { "ftps" } else { "ftp" };
             let port = opt(o, "port").unwrap_or("21");
             let endpoint = format!("{scheme}://{}:{port}", req(o, "host")?);
+            // OpenDAL's FTP pool retries silently; fail fast on refused/unreachable hosts.
+            probe_tcp(req(o, "host")?, port).await?;
             let mut b = opendal::services::Ftp::default().endpoint(&endpoint).root(root);
             if let Some(u) = opt(o, "username") {
                 b = b.user(u);
@@ -452,6 +469,15 @@ pub async fn build(conn: &Connection, secrets: &Opts) -> AppResult<Built> {
             let (fs, learned) = vfs::sftp::SftpFs::connect(o, s).await?;
             Ok(Built { provider: Arc::new(fs), learned_host_key: learned })
         }
+    }
+}
+
+async fn probe_tcp(host: &str, port: &str) -> AppResult<()> {
+    let addr = format!("{host}:{port}");
+    match tokio::time::timeout(std::time::Duration::from_secs(8), tokio::net::TcpStream::connect(&addr)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(AppError::Connection(format!("can't reach {addr}: {e}"))),
+        Err(_) => Err(AppError::Connection(format!("can't reach {addr}: timed out"))),
     }
 }
 
@@ -481,6 +507,23 @@ mod tests {
         assert_eq!(s.get("password").unwrap(), "hunter2");
         // Empty secrets are dropped so they don't overwrite stored values.
         assert!(!s.contains_key("passphrase"));
+    }
+
+    #[test]
+    fn changing_host_forgets_the_trusted_host_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Connections::load_with(dir.path().to_path_buf(), false);
+        let mut o = Opts::new();
+        o.insert("host".into(), "a.example.com".into());
+        o.insert("hostKey".into(), "SHA256:abc".into());
+        let c = store.upsert(ConnectionInput { id: None, name: "s".into(), kind: Kind::Sftp, options: o.clone(), color: None }).unwrap();
+        // Same host: kept.
+        let c = store.upsert(ConnectionInput { id: Some(c.id), name: "s".into(), kind: Kind::Sftp, options: o.clone(), color: None }).unwrap();
+        assert_eq!(c.options.get("hostKey").map(String::as_str), Some("SHA256:abc"));
+        // New host: dropped.
+        o.insert("host".into(), "b.example.com".into());
+        let c = store.upsert(ConnectionInput { id: Some(c.id), name: "s".into(), kind: Kind::Sftp, options: o, color: None }).unwrap();
+        assert!(c.options.get("hostKey").is_none());
     }
 
     #[test]

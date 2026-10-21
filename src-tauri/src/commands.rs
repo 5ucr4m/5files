@@ -321,11 +321,13 @@ pub async fn connection_test(state: S<'_>, input: ConnectionInput) -> AppResult<
         created_at: 0,
         insecure_secrets: false,
     };
-    let built = tokio::time::timeout(std::time::Duration::from_secs(25), connections::build(&conn, &secrets))
+    let probe = async {
+        let built = connections::build(&conn, &secrets).await?;
+        built.provider.list(&built.provider.root()).await.map(|e| e.len())
+    };
+    tokio::time::timeout(connections::CONNECT_TIMEOUT, probe)
         .await
-        .map_err(|_| AppError::Connection("timed out".into()))??;
-    let entries = built.provider.list(&built.provider.root()).await?;
-    Ok(entries.len())
+        .map_err(|_| AppError::Connection(format!("no answer after {}s — check the host and port", connections::CONNECT_TIMEOUT.as_secs())))?
 }
 
 #[tauri::command]
@@ -368,7 +370,7 @@ pub async fn search_start(
     let id = uuid::Uuid::new_v4().to_string();
     let token = CancellationToken::new();
     state.searches.lock().insert(id.clone(), token.clone());
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         search::run(p, root, query, include_hidden, token, move |e| {
             let _ = on_event.send(e);
         })
@@ -413,4 +415,10 @@ pub fn reveal_item<R: Runtime>(app: AppHandle<R>, path: String) -> AppResult<()>
 #[tauri::command]
 pub fn frontend_log(level: String, message: String) {
     eprintln!("[webview:{level}] {message}");
+}
+
+/// Directory for the built-in end-to-end smoke run (`ATLAS_E2E=<dir>`), if enabled.
+#[tauri::command]
+pub fn e2e_dir() -> Option<String> {
+    std::env::var("ATLAS_E2E").ok().filter(|d| !d.is_empty())
 }

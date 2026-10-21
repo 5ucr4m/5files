@@ -115,6 +115,13 @@ export const INTEGRATIONS: Integration[] = [
       { key: "privateKey", label: "Private key (paste)", type: "textarea", secret: true, when: { key: "authMethod", is: ["key"] } },
       { key: "passphrase", label: "Key passphrase", type: "password", secret: true, when: { key: "authMethod", is: ["key"] } },
       { key: "root", label: "Start folder", type: "text", placeholder: "Home folder" },
+      {
+        key: "hostKey",
+        label: "Trusted server key",
+        type: "text",
+        placeholder: "Saved on first connect",
+        help: "Atlas refuses to connect if the server's key changes. Clear this only if you know the server was reinstalled or its key rotated.",
+      },
     ],
   },
   {

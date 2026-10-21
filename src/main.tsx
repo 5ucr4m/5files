@@ -26,6 +26,11 @@ async function boot() {
   // The window starts hidden to avoid a white flash. A hidden webview doesn't run
   // requestAnimationFrame, so use a short timeout to let React commit before showing.
   setTimeout(() => void backend.window.show(), 30);
+  if (isTauri) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const dir = await invoke<string | null>("e2e_dir");
+    if (dir) setTimeout(() => void import("./lib/e2e").then((m) => m.runE2E(dir)), 800);
+  }
 }
 
 // Native context menu / text selection outside inputs feel out of place in a desktop app.

@@ -56,99 +56,7 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
                 responder.respond(thumbs::respond(uri, cache).await);
             });
         })
-        .setup(|app| {
-            let handle = app.handle().clone();
-            let config_dir = config_dir(app)?;
-            let temp_dir = config_dir.join("cache").join("open");
-            // Old "open remote file" downloads are disposable.
-            let _ = std::fs::remove_dir_all(&temp_dir);
-
-            let local: vfs::DynProvider = Arc::new(vfs::local::LocalFs);
-            let use_keychain = std::env::var_os("ATLAS_NO_KEYCHAIN").is_none();
-            let conns = Arc::new(connections::Connections::load_with(config_dir, use_keychain));
-
-            let dirty = Arc::new(AtomicBool::new(true));
-            let resolve: transfer::Resolver = {
-                let (local, conns) = (local.clone(), conns.clone());
-                Arc::new(move |fs: String| {
-                    let (local, conns) = (local.clone(), conns.clone());
-                    Box::pin(async move { if fs == "local" { Ok(local) } else { conns.provider(&fs).await } })
-                })
-            };
-            let notify: transfer::Notify = {
-                let dirty = dirty.clone();
-                Arc::new(move || dirty.store(true, Ordering::Relaxed))
-            };
-            let on_done: transfer::OnDone = {
-                let handle = handle.clone();
-                Arc::new(move |job: &transfer::JobSnapshot| {
-                    if job.open_after {
-                        if let Some(path) = job.outputs.first() {
-                            let _ = handle.opener().open_path(path, None::<&str>);
-                        }
-                    }
-                    let _ = handle.emit("transfer-done", job.clone());
-                })
-            };
-            let transfers = transfer::Manager::new(3, resolve, notify, on_done);
-
-            let watcher = {
-                let handle = handle.clone();
-                watcher::Watcher::new(move |dirs| {
-                    let _ = handle.emit("fs-changed", dirs);
-                })
-            };
-
-            app.manage(AppState {
-                local,
-                conns,
-                transfers: transfers.clone(),
-                watcher,
-                searches: Default::default(),
-                temp_dir,
-            });
-
-            // Transfer updates: coalesce many progress ticks into ~8 UI updates/second.
-            {
-                let handle = handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    let mut iv = tokio::time::interval(TRANSFER_TICK);
-                    loop {
-                        iv.tick().await;
-                        if dirty.swap(false, Ordering::Relaxed) {
-                            let _ = handle.emit("transfers", transfers.snapshots());
-                        }
-                    }
-                });
-            }
-            // Safety net: the UI shows the window after its first paint; if that never
-            // happens (e.g. a script error), show it anyway rather than staying invisible.
-            {
-                let handle = handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    if let Some(w) = handle.get_webview_window("main") {
-                        if !w.is_visible().unwrap_or(true) {
-                            eprintln!("[atlas] window was not shown by the UI; showing it");
-                            let _ = w.show();
-                        }
-                    }
-                });
-            }
-            // App-scoped disk / network throughput.
-            {
-                let handle = handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    let mut sampler = metrics::RateSampler::new(120);
-                    let mut iv = tokio::time::interval(METRICS_TICK);
-                    loop {
-                        iv.tick().await;
-                        let _ = handle.emit("metrics", sampler.sample());
-                    }
-                });
-            }
-            Ok(())
-        })
+        .setup(|app| init(app))
         .invoke_handler(tauri::generate_handler![
             commands::list_dir,
             commands::stat,
@@ -183,5 +91,102 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::open_item,
             commands::reveal_item,
             commands::frontend_log,
+            commands::e2e_dir,
         ])
+}
+
+/// Creates the app state and background tasks. Runs from `setup`; tests call it
+/// directly on a mock app (whose event loop never starts).
+pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
+    let handle = app.handle().clone();
+    let config_dir = config_dir(app)?;
+    let temp_dir = config_dir.join("cache").join("open");
+    // Old "open remote file" downloads are disposable.
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    let local: vfs::DynProvider = Arc::new(vfs::local::LocalFs);
+    let use_keychain = std::env::var_os("ATLAS_NO_KEYCHAIN").is_none();
+    let conns = Arc::new(connections::Connections::load_with(config_dir, use_keychain));
+
+    let dirty = Arc::new(AtomicBool::new(true));
+    let resolve: transfer::Resolver = {
+        let (local, conns) = (local.clone(), conns.clone());
+        Arc::new(move |fs: String| {
+            let (local, conns) = (local.clone(), conns.clone());
+            Box::pin(async move { if fs == "local" { Ok(local) } else { conns.provider(&fs).await } })
+        })
+    };
+    let notify: transfer::Notify = {
+        let dirty = dirty.clone();
+        Arc::new(move || dirty.store(true, Ordering::Relaxed))
+    };
+    let on_done: transfer::OnDone = {
+        let handle = handle.clone();
+        Arc::new(move |job: &transfer::JobSnapshot| {
+            if job.open_after {
+                if let Some(path) = job.outputs.first() {
+                    let _ = handle.opener().open_path(path, None::<&str>);
+                }
+            }
+            let _ = handle.emit("transfer-done", job.clone());
+        })
+    };
+    let transfers = transfer::Manager::new(3, resolve, notify, on_done);
+
+    let watcher = {
+        let handle = handle.clone();
+        watcher::Watcher::new(move |dirs| {
+            let _ = handle.emit("fs-changed", dirs);
+        })
+    };
+
+    app.manage(AppState {
+        local,
+        conns,
+        transfers: transfers.clone(),
+        watcher,
+        searches: Default::default(),
+        temp_dir,
+    });
+
+    // Transfer updates: coalesce many progress ticks into ~8 UI updates/second.
+    {
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut iv = tokio::time::interval(TRANSFER_TICK);
+            loop {
+                iv.tick().await;
+                if dirty.swap(false, Ordering::Relaxed) {
+                    let _ = handle.emit("transfers", transfers.snapshots());
+                }
+            }
+        });
+    }
+    // Safety net: the UI shows the window after its first paint; if that never
+    // happens (e.g. a script error), show it anyway rather than staying invisible.
+    {
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            if let Some(w) = handle.get_webview_window("main") {
+                if !w.is_visible().unwrap_or(true) {
+                    eprintln!("[atlas] window was not shown by the UI; showing it");
+                    let _ = w.show();
+                }
+            }
+        });
+    }
+    // App-scoped disk / network throughput.
+    {
+        let handle = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut sampler = metrics::RateSampler::new(120);
+            let mut iv = tokio::time::interval(METRICS_TICK);
+            loop {
+                iv.tick().await;
+                let _ = handle.emit("metrics", sampler.sample());
+            }
+        });
+    }
+    Ok(())
 }
