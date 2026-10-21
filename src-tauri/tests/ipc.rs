@@ -25,6 +25,7 @@ fn harness() -> Harness {
     unsafe {
         std::env::set_var("FIVEFILES_CONFIG_DIR", config.path());
         std::env::set_var("FIVEFILES_NO_KEYCHAIN", "1");
+        std::env::set_var("FIVEFILES_NO_TRAY", "1");
     }
     let mut app = fivefiles_lib::build(mock_builder()).build(tauri::generate_context!(test = true)).unwrap();
     fivefiles_lib::init(&mut app).unwrap();

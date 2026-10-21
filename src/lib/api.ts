@@ -42,6 +42,10 @@ export interface Backend {
   readDataUrl(fs: FsId, path: string): Promise<string>;
   dirSize(fs: FsId, path: string): Promise<DirSize>;
   volumes(): Promise<Volume[]>;
+  /** Whether closing the window keeps 5files running in the tray. */
+  setBackgroundMode(enabled: boolean): Promise<void>;
+  /** The tray menu asked to show a panel ("transfers" | "syncs"). */
+  onTrayOpen(cb: (what: string) => void): Promise<Unlisten>;
   /** Ejects a removable volume by its mount point. */
   eject(mount: string): Promise<void>;
   places(): Promise<Place[]>;
@@ -117,6 +121,8 @@ async function tauriBackend(): Promise<Backend> {
     dirSize: (fs, path) => invoke("dir_size", { fs, path }),
     volumes: () => invoke("get_volumes"),
     eject: (mount) => invoke("eject_volume", { mount }),
+    setBackgroundMode: (enabled) => invoke("set_background_mode", { enabled }),
+    onTrayOpen: (cb) => listen<string>("tray-open", (e) => cb(e.payload)),
     places: () => invoke("get_places"),
     platform: () => invoke("platform"),
     connections: () => invoke("connections_list"),

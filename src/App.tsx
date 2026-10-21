@@ -38,6 +38,10 @@ function useTheme() {
   useEffect(() => {
     document.documentElement.dataset.reduceMotion = String(reduce);
   }, [reduce]);
+  const keepRunning = useSettings((s) => s.keepRunning);
+  useEffect(() => {
+    void api().setBackgroundMode(keepRunning);
+  }, [keepRunning]);
 }
 
 function useBackendEvents() {
@@ -47,6 +51,7 @@ function useBackendEvents() {
       a.onTransfers((jobs) => useTransfers.getState().set(jobs)),
       a.onMetrics((m) => useMetrics.getState().push(m)),
       a.onSyncs((list) => useSyncs.getState().set(list)),
+      a.onTrayOpen((what) => useUi.getState().set(what === "syncs" ? { panel: "sync", syncView: null } : { panel: "transfers" })),
       a.onFsChanged((dirs) => {
         const set = new Set(dirs);
         useTabs.getState().refreshWhere((t) => t.fs === "local" && !t.search && set.has(t.path));

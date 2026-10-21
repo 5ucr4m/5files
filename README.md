@@ -78,6 +78,10 @@ network download/upload in real time (mirrored traces, last 60 s). It counts the
 5files's own I/O paths, so it reflects only this app, identically on all three platforms. Click it for
 totals and peaks.
 
+**Menu bar / system tray** — live transfer and sync status (click to open the panel), Sync all now,
+Pause syncs, Quit. Closing the window keeps 5files running there so syncs continue (setting; on macOS
+the Dock icon brings the window back). The icon gains a dot while something is copying or syncing.
+
 **Look & feel** — light, dark or system theme, six accent colors, comfortable/compact density, icon
 size slider, spring animations throughout (respects "reduce motion").
 

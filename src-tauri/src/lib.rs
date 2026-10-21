@@ -8,6 +8,7 @@ pub mod sizes;
 pub mod sync;
 pub mod thumbs;
 pub mod transfer;
+pub mod tray;
 pub mod vfs;
 pub mod volumes;
 pub mod watcher;
@@ -26,7 +27,26 @@ const METRICS_TICK: Duration = Duration::from_millis(500);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    build(tauri::Builder::default()).run(tauri::generate_context!()).expect("error while running tauri application");
+    let app = build(tauri::Builder::default())
+        // Closing the window keeps 5files running in the tray (syncs continue), unless
+        // the user turned that off or chose Quit.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if tray::KEEP_RUNNING.load(Ordering::Relaxed) && window.app_handle().tray_by_id("main").is_some() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(|_app, _event| {
+        // macOS: clicking the Dock icon brings the hidden window back.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = _event {
+            tray::show_main(_app);
+        }
+    });
 }
 
 /// Directory for config + secrets fallback. `FIVEFILES_CONFIG_DIR` overrides it (portable
@@ -98,6 +118,7 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::sync_run,
             commands::sync_pause,
             commands::eject_volume,
+            commands::set_background_mode,
         ])
 }
 
@@ -157,6 +178,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
         sync::Engine::new(config_dir.clone(), resolve, Arc::new(move || d.store(true, Ordering::Relaxed)))
     };
     syncs.start();
+    let (syncs_for_tray, transfers_for_tray) = (syncs.clone(), transfers.clone());
 
     let watcher = {
         let handle = handle.clone();
@@ -211,15 +233,32 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
             }
         });
     }
-    // App-scoped disk / network throughput.
+    // Tray icon (optional: some Linux desktops have no tray).
+    // FIVEFILES_NO_TRAY: headless test runs (native menus need the main thread).
+    let tray_icon = if std::env::var_os("FIVEFILES_NO_TRAY").is_some() {
+        None
+    } else {
+        match tray::Tray::build(&handle, syncs_for_tray.clone()) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                eprintln!("[5files] no system tray: {e}");
+                None
+            }
+        }
+    };
+    // App-scoped disk / network throughput, and the tray's live status.
     {
         let handle = handle.clone();
+        let transfers = transfers_for_tray;
         tauri::async_runtime::spawn(async move {
             let mut sampler = metrics::RateSampler::new(120);
             let mut iv = tokio::time::interval(METRICS_TICK);
             loop {
                 iv.tick().await;
                 let _ = handle.emit("metrics", sampler.sample());
+                if let Some(t) = &tray_icon {
+                    t.update(&transfers.snapshots(), &syncs_for_tray.views());
+                }
             }
         });
     }

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- pipe: drops from the top, elbows into the folder's side -->
+  <path d="M12 6V30a10 10 0 0 0 10 10h4" fill="none" stroke="#000" stroke-width="7" stroke-linecap="round"/>
+  <!-- folder (horizontal): back with tab, front panel -->
+  <path d="M24 22a4 4 0 0 1 4-4h9l4 4h15a4 4 0 0 1 4 4v28H24Z" fill="#000" opacity="0.55"/>
+  <path d="M24 30a4 4 0 0 1 4-4h28a4 4 0 0 1 4 4v20a6 6 0 0 1-6 6H30a6 6 0 0 1-6-6Z" fill="#000"/>
+  
+</svg>

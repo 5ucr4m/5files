@@ -571,3 +571,9 @@ pub async fn eject_volume(state: S<'_>, mount: String) -> AppResult<()> {
     state.watcher.release_under(&mount);
     volumes::eject(&vol.mount, &vol.device).await.map_err(|e| AppError::Other(format!("Couldn't eject {}: {e}", vol.name)))
 }
+
+/// Whether closing the window keeps 5files running in the tray.
+#[tauri::command]
+pub fn set_background_mode(enabled: bool) {
+    crate::tray::KEEP_RUNNING.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}

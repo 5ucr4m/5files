@@ -286,6 +286,38 @@ impl Engine {
         (self.notify)();
     }
 
+    /// "Sync all now" (skips paused pairs).
+    pub fn run_all(&self) {
+        let ids: Vec<String> = self.pairs.lock().iter().filter(|p| !p.paused).map(|p| p.id.clone()).collect();
+        for id in ids {
+            self.states.lock().insert(id.clone(), State::Idle);
+            self.trigger(&id);
+        }
+        (self.notify)();
+    }
+
+    pub fn all_paused(&self) -> bool {
+        let pairs = self.pairs.lock();
+        !pairs.is_empty() && pairs.iter().all(|p| p.paused)
+    }
+
+    /// Pauses or resumes every sync.
+    pub fn pause_all(&self, paused: bool) {
+        let ids: Vec<String> = {
+            let mut pairs = self.pairs.lock();
+            pairs.iter_mut().for_each(|p| p.paused = paused);
+            pairs.iter().map(|p| p.id.clone()).collect()
+        };
+        let _ = self.persist();
+        if !paused {
+            for id in &ids {
+                self.states.lock().insert(id.clone(), State::Idle);
+                self.trigger(id);
+            }
+        }
+        (self.notify)();
+    }
+
     /// Whether a sync is running right now on a folder of `fs` matched by `on`.
     pub fn busy_on(&self, fs: &str, on: &dyn Fn(&str) -> bool) -> bool {
         let running = self.running.lock();

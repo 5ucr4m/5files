@@ -12,11 +12,16 @@ name = "fivefiles_lib"
 # Desktop-only app: rlib is all the binary needs (staticlib/cdylib are for mobile targets).
 crate-type = ["rlib"]
 
+# The executable is "5files" (package/crate names can't start with a digit; binaries can).
+[[bin]]
+name = "5files"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }

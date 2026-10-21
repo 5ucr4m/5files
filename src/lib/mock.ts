@@ -431,6 +431,8 @@ export function createMockBackend(): Backend {
     async volumes() {
       return volumesList.map((v) => ({ ...v }));
     },
+    async setBackgroundMode() {},
+    onTrayOpen: () => Promise.resolve(() => {}),
     async eject(mount) {
       await delay(null, 900);
       const i = volumesList.findIndex((v) => v.mount === mount);

@@ -33,6 +33,8 @@ interface SettingsState {
   reduceMotion: boolean;
   /** Measure folder sizes automatically (local folders, not at a drive's top level). */
   folderSizes: boolean;
+  /** Closing the window keeps 5files in the tray / menu bar (syncs keep running). */
+  keepRunning: boolean;
   favorites: Favorite[];
   set: (patch: Partial<Omit<SettingsState, "set" | "toggleFavorite">>) => void;
   toggleFavorite: (f: Favorite) => void;
@@ -61,6 +63,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   sidebarWidth: 232,
   reduceMotion: false,
   folderSizes: true,
+  keepRunning: true,
   favorites: [],
   ...load(),
   set: (patch) => set(patch),
