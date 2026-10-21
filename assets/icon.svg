@@ -1,32 +1,67 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#6b5cff"/>
-      <stop offset="0.55" stop-color="#3b4cf5"/>
-      <stop offset="1" stop-color="#1f2bb8"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#1b2150"/>
+      <stop offset="1" stop-color="#0b0e26"/>
     </linearGradient>
-    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7b86ff"/>
+      <stop offset="1" stop-color="#3b4cf5"/>
+    </linearGradient>
+    <linearGradient id="back" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a54c9"/>
+      <stop offset="1" stop-color="#2c35a3"/>
+    </linearGradient>
+    <linearGradient id="collar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c9cff5"/>
+      <stop offset="0.45" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#9aa3dd"/>
+    </linearGradient>
+    <linearGradient id="collarV" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e6e9ff"/>
+      <stop offset="1" stop-color="#9aa3dd"/>
     </linearGradient>
-    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0b1170" flood-opacity="0.35"/>
+    <radialGradient id="orb" cx="0.35" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="clip"><rect x="80" y="80" width="864" height="864" rx="208"/></clipPath>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity="0.45"/>
     </filter>
   </defs>
-  <rect x="80" y="80" width="864" height="864" rx="208" fill="url(#bg)"/>
-  <!-- the stack: four cards fanned behind the front one (= five files) -->
-  <g transform="translate(512 560)">
-    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.16" transform="rotate(-24)"/>
-    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.24" transform="rotate(-14)"/>
-    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.32" transform="rotate(14)"/>
-    <rect x="-200" y="-280" width="400" height="520" rx="44" fill="#fff" opacity="0.22" transform="rotate(24)"/>
-    <!-- front card with folded corner -->
-    <g filter="url(#sh)">
-      <path d="M-200 -236a44 44 0 0 1 44-44H104l96 96V196a44 44 0 0 1-44 44H-156a44 44 0 0 1-44-44Z" fill="url(#card)"/>
+
+  <rect x="80" y="80" width="864" height="864" rx="208" fill="url(#tile)"/>
+
+  <g transform="translate(-6 62)">
+    <!-- folder: back panel with tab -->
+    <path d="M392 330a44 44 0 0 1 44-44h132c14 0 27 6 36 17l30 35h192a44 44 0 0 1 44 44v348H392Z" fill="url(#back)"/>
+
+    <!-- glass pipe: comes down from the top edge, elbows into the folder's side -->
+    <path id="pipe" d="M262 168V462a124 124 0 0 0 124 124h40" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="124" stroke-linecap="butt"/>
+    <path d="M262 168V462a124 124 0 0 0 124 124h40" fill="none" stroke="#141a44" stroke-width="108"/>
+    <path d="M262 168V462a124 124 0 0 0 124 124h40" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="108"/>
+    <!-- glass highlight -->
+    <path d="M236 196V452" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="12" stroke-linecap="round"/>
+
+    <!-- five providers flowing in -->
+    <g>
+      <circle cx="262" cy="232" r="33" fill="#ffb020"/><circle cx="262" cy="232" r="33" fill="url(#orb)"/>
+      <circle cx="262" cy="326" r="33" fill="#4c8dff"/><circle cx="262" cy="326" r="33" fill="url(#orb)"/>
+      <circle cx="262" cy="420" r="33" fill="#19c3e6"/><circle cx="262" cy="420" r="33" fill="url(#orb)"/>
+      <circle cx="278" cy="515" r="33" fill="#2ed47a"/><circle cx="278" cy="515" r="33" fill="url(#orb)"/>
+      <circle cx="338" cy="577" r="33" fill="#ff5a6e"/><circle cx="338" cy="577" r="33" fill="url(#orb)"/>
     </g>
-    <path d="M104 -280v52a44 44 0 0 0 44 44h52Z" fill="#c9cffb"/>
-    <!-- the 5 -->
-    <path d="M78 -148H-62L-78 -8C-46 -30-6 -38 28 -32C96 -20 128 34 120 88C110 156 52 190-8 188C-52 186-86 168-108 142"
-          fill="none" stroke="#3b4cf5" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- coupling collars -->
+    <rect x="182" y="142" width="160" height="46" rx="14" fill="url(#collarV)"/>
+    <rect x="196" y="186" width="132" height="10" rx="5" fill="#000" opacity="0.18"/>
+    <rect x="356" y="526" width="48" height="148" rx="14" fill="url(#collar)"/>
+
+    <!-- folder: front panel -->
+    <g filter="url(#soft)">
+      <path d="M392 452a44 44 0 0 1 44-44h400a44 44 0 0 1 44 44v262a56 56 0 0 1-56 56H448a56 56 0 0 1-56-56Z" fill="url(#front)"/>
+    </g>
+    <path d="M436 408h400a44 44 0 0 1 44 44v8H392v-8a44 44 0 0 1 44-44Z" fill="#ffffff" opacity="0.18"/>
   </g>
 </svg>
