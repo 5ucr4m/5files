@@ -20,6 +20,17 @@ queue with real progress, and a live monitor in the title bar shows how much dis
 - Image thumbnails generated in Rust, cached on disk and decoded off the UI thread
 - Live refresh when files change on disk (watcher), hidden files toggle, favorites, OS trash
 
+**Split panes (tmux-style)**
+- Split any tab side by side or stacked, as many times as fits; drag the gutters to resize
+  (double-click evens them out); each pane has its own folder, history, selection and search
+- tmux keys after the `Ctrl+B` prefix (a hint bar shows them): `%` split right, `"` split down,
+  arrows move between panes, `o` next pane, `z` zoom, `x` close pane, `c` new tab, `n`/`p` next/previous tab
+- Direct shortcuts: `⌘\`/`Ctrl+\` split right, `⇧⌘\`/`Ctrl+Shift+\` split down,
+  `⌥⌘ arrows`/`Ctrl+Alt+arrows` move, `⇧⌘↩` zoom, `⌘W`/`Ctrl+W` closes the pane (the tab when it's the last one)
+- Moving files between panes: `F5` copies and `F6` moves the selection into the other pane's folder
+  (also in the context menu as "Copy to …" / "Move to …"), or drag across
+- Panes spring open from the edge and collapse on close; a light bar glides to the focused pane
+
 **Working with files**
 - Copy / cut / paste across tabs **and across drives** (local ⇄ S3 ⇄ SFTP …), duplicate, rename inline (F2)
 - Drag & drop between views, tabs, breadcrumbs and the sidebar (`⌥`/`Ctrl` forces copy), drop files in from the OS
