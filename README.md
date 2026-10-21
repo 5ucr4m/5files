@@ -50,6 +50,8 @@ queue with real progress, and a live monitor in the title bar shows how much dis
   nothing to install there. The panel shows the link, a QR code to scan, and live activity
 - Visitors browse subfolders, preview photos, video (with seeking), audio, PDFs and text, download
   files, or download a whole folder as a ZIP (streamed, with a real progress bar)
+- Optional PIN (4–8 digits, a random one is suggested): visitors type it before they see anything;
+  five wrong tries lock that device out for 30 s, doubling each round; a new PIN signs everyone out
 - Optional: let visitors add files (drag & drop or a picker; never delete or replace),
   include hidden files, stop automatically after 1 hour or 1 day
 - Only people with the link get in (unguessable token); nothing outside the folder is reachable,

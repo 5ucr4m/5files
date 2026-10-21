@@ -238,13 +238,15 @@ export interface ShareOptions {
   showHidden: boolean;
   /** Stop sharing after this many minutes; null = until stopped. */
   expiresInMins: number | null;
+  /** Visitors must type this (4–8 digits) before they see anything; null = no PIN. */
+  pin: string | null;
 }
 
 export interface ShareActivity {
   at: number;
   /** Visitor's address on the network. */
   who: string;
-  action: "opened" | "downloaded" | "zip" | "uploaded";
+  action: "opened" | "unlocked" | "wrongPin" | "downloaded" | "zip" | "uploaded";
   name: string;
 }
 

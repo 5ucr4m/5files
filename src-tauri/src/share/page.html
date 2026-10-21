@@ -250,6 +250,33 @@ a.collar:hover { border-color: var(--ink-4); color: var(--ink); }
 .broken .seg.r { border-radius: 2px 0 0 2px; transform: rotate(5deg) translateY(2px); transform-origin: right; margin-left: 14px; }
 .broken .tap { background: var(--ink-3); }
 
+/* ---------- PIN ---------- */
+.gate { display: grid; place-items: center; padding: 56px 0 96px; text-align: center; }
+.gate .pipe-art { display: inline-flex; align-items: center; margin-bottom: 30px; }
+.gate .pipe-art .seg { width: 64px; }
+.lock {
+  position: relative; z-index: 1; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line-strong); color: var(--ink-2);
+  box-shadow: 0 1px 0 var(--pipe-hi) inset, 0 1px 2px rgb(16 18 24 / .05);
+}
+.gate.open .lock { color: var(--success); border-color: color-mix(in oklab, var(--success) 50%, var(--line-strong)); }
+.gate h2 { margin: 0 0 6px; font-size: 26px; font-weight: 650; letter-spacing: -0.035em; }
+.gate p { margin: 0 auto; max-width: 360px; color: var(--ink-3); }
+.gate form { margin: 26px auto 0; width: min(320px, 100%); display: grid; gap: 10px; }
+.pin {
+  width: 100%; height: 60px; border-radius: 14px; border: 1px solid var(--line-strong); background: var(--surface);
+  text-align: center; font: 600 28px/1 "Geist Mono", ui-monospace, Menlo, monospace; letter-spacing: .38em; padding-left: .38em; color: var(--ink);
+  outline: 0; transition: border-color .15s, box-shadow .15s;
+}
+.pin::placeholder { color: var(--ink-4); letter-spacing: .3em; font-weight: 400; }
+.pin:focus { border-color: color-mix(in oklab, var(--accent) 60%, var(--line)); box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 14%, transparent); }
+.pin:disabled { opacity: .55; }
+.gate .btn { height: 46px; font-size: 14.5px; }
+.gate .msg { min-height: 20px; font-size: 13px; color: var(--ink-3); }
+.gate .msg.bad { color: var(--danger); }
+.shake { animation: shake .38s cubic-bezier(.36,.07,.19,.97); }
+@keyframes shake { 20%, 60% { transform: translateX(-7px); } 40%, 80% { transform: translateX(7px); } }
+
 footer { color: var(--ink-4); font-size: 12px; padding: 4px 0 40px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 footer svg.i { width: 14px; height: 14px; }
 
@@ -385,6 +412,7 @@ footer svg.i { width: 14px; height: 14px; }
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
     <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   </defs>
 </svg>
@@ -672,6 +700,11 @@ footer svg.i { width: 14px; height: 14px; }
     }
     if (seq !== S.loadSeq) return;
     if (res.status === 404 && !S.data) return gone();
+    if (res.status === 401) {
+      let info = {};
+      try { info = await res.json(); } catch {}
+      return askPin(info.host, S.data ? "The PIN was changed. Enter the new one." : null, () => load(rel));
+    }
     if (!res.ok) {
       if (res.status === 404) {
         toast("That folder isn't here anymore.");
@@ -696,6 +729,93 @@ footer svg.i { width: 14px; height: 14px; }
     renderHead();
     render();
     if (changed) flow("var(--accent)", false, prevDepth > 0 && data.crumbs.length > prevDepth ? prevDepth - 1 : null);
+  };
+
+  // The share asks for a PIN: everything stays hidden until it's right. The server
+  // sets a cookie on success, so files, thumbnails and uploads just work after.
+  let lockTimer;
+  const askPin = (host, note, then) => {
+    document.title = "Enter the PIN · 5files";
+    $("footText").textContent = "Only people with the link and the PIN can open this folder.";
+    $("pipe").replaceChildren();
+    for (const id of ["head", "tools"]) $(id).style.display = "none";
+    closeViewer(true);
+    const input = h("input", {
+      class: "pin", type: "password", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9]*",
+      maxlength: "8", placeholder: "••••", "aria-label": "PIN", required: true,
+    });
+    const msg = h("div", { class: "msg" + (note ? " bad" : ""), role: "status" }, note || "");
+    const btn = h("button", { class: "btn primary", type: "submit" }, "Open folder");
+    const lock = h("span", { class: "lock" }, icon("lock"));
+    const gate = h("div", { class: "gate" },
+      h("div", {},
+        h("div", { class: "pipe-art", "aria-hidden": "true" }, h("span", { class: "tap" }, icon("laptop"), host || "Shared folder"), h("i", { class: "seg" }), lock),
+        h("h2", {}, "Enter the PIN"),
+        h("p", {}, "This folder is protected. Ask the person who shared it for the PIN."),
+      ),
+    );
+    const lockFor = (secs) => {
+      clearInterval(lockTimer);
+      input.disabled = btn.disabled = true;
+      let left = secs;
+      const tick = () => {
+        msg.className = "msg bad";
+        msg.textContent = "Too many tries. Try again in " + left + " s.";
+        if (left-- <= 0) {
+          clearInterval(lockTimer);
+          input.disabled = btn.disabled = false;
+          msg.className = "msg";
+          msg.textContent = "";
+          input.focus();
+        }
+      };
+      tick();
+      lockTimer = setInterval(tick, 1000);
+    };
+    const form = h("form", {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const pin = input.value.replace(/\D/g, "");
+        if (pin.length < 4) {
+          msg.className = "msg bad";
+          msg.textContent = "The PIN has 4 to 8 digits.";
+          return;
+        }
+        btn.disabled = true;
+        let r;
+        try {
+          r = await fetch("pin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pin }) });
+        } catch {
+          btn.disabled = false;
+          msg.className = "msg bad";
+          msg.textContent = "Can't reach " + (host || "the computer") + ". Check the network and try again.";
+          return;
+        }
+        let j = {};
+        try { j = await r.json(); } catch {}
+        btn.disabled = false;
+        if (r.ok) {
+          gate.classList.add("open");
+          lock.replaceChildren(icon("unlock"));
+          msg.className = "msg";
+          msg.textContent = "";
+          for (const id of ["head", "tools"]) $(id).style.display = "";
+          setTimeout(then, reduced ? 0 : 280);
+          return;
+        }
+        input.value = "";
+        form.classList.remove("shake");
+        void form.offsetWidth;
+        form.classList.add("shake");
+        if (r.status === 429) return lockFor(j.retryIn || 30);
+        msg.className = "msg bad";
+        msg.textContent = j.triesLeft != null ? "Wrong PIN. " + plural(j.triesLeft, "try", "tries") + " left before a short wait." : "Wrong PIN.";
+        input.focus();
+      },
+    }, input, btn, msg);
+    gate.append(form);
+    $("main").replaceChildren(gate);
+    input.focus();
   };
 
   const gone = () => {
@@ -1003,6 +1123,9 @@ footer svg.i { width: 14px; height: 14px; }
         let name;
         try { name = JSON.parse(xhr.responseText).name; } catch {}
         finish(true, "", name);
+      } else if (xhr.status === 401) {
+        finish(false, "Enter the PIN again, then add this file again.");
+        load(S.rel);
       } else if (xhr.status === 403) finish(false, "Adding files was turned off on " + (S.data ? S.data.host : "the computer") + ".");
       else if (xhr.status === 404) finish(false, "The folder isn't shared anymore.");
       else finish(false, xhr.responseText || "Couldn't add this file.");

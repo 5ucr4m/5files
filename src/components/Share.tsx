@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Copy, Download, ExternalLink, Eye, FileArchive, Laptop, Radio, TriangleAlert, Upload, Users, X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, ExternalLink, Eye, FileArchive, KeyRound, Laptop, LockOpen, Radio, RefreshCw, ShieldAlert, TriangleAlert, Upload, Users, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../lib/api";
@@ -11,7 +11,16 @@ import { FolderGlyph } from "./FileIcon";
 import { Segmented, Toggle } from "./Settings";
 import { relativeTime } from "./Sync";
 
-const DEFAULTS: ShareOptions = { allowUpload: false, showHidden: false, expiresInMins: null };
+const DEFAULTS: ShareOptions = { allowUpload: false, showHidden: false, expiresInMins: null, pin: null };
+
+/** Six random digits (crypto-grade). */
+export function randomPin(): string {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return String(a[0] % 1_000_000).padStart(6, "0");
+}
+
+const validPin = (p: string) => /^\d{4,8}$/.test(p);
 
 /** Shares a folder on the local network (or shows its link if it already is). */
 export async function shareFolder(fs: FsId, path: string) {
@@ -122,10 +131,83 @@ function Pipe({ share }: { share: ShareView }) {
 
 const ACTION: Record<ShareActivity["action"], { icon: typeof Eye; text: (a: ShareActivity) => React.ReactNode }> = {
   opened: { icon: Eye, text: () => "opened the link" },
+  unlocked: { icon: LockOpen, text: () => "entered the PIN" },
+  wrongPin: { icon: ShieldAlert, text: () => <span className="text-danger">typed a wrong PIN</span> },
   downloaded: { icon: Download, text: (a) => <>downloaded <b className="font-medium text-ink">{a.name}</b></> },
   zip: { icon: FileArchive, text: (a) => <>downloaded <b className="font-medium text-ink">{a.name}</b> as .zip</> },
   uploaded: { icon: Upload, text: (a) => <>added <b className="font-medium text-ink">{a.name}</b></> },
 };
+
+/** The PIN, big enough to read out loud; editable in place. */
+function PinField({ pin, onChange }: { pin: string; onChange: (pin: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(pin);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setDraft(pin), [pin]);
+  const ok = validPin(draft);
+  const save = () => {
+    if (!ok) return;
+    setEditing(false);
+    if (draft !== pin) onChange(draft);
+  };
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          inputMode="numeric"
+          maxLength={8}
+          onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") (setDraft(pin), setEditing(false));
+          }}
+          onBlur={() => (ok ? save() : (setDraft(pin), setEditing(false)))}
+          aria-label="PIN"
+          style={{ fontSize: 22, fontWeight: 600 }}
+          className={`num h-11 w-[190px] rounded-xl border bg-surface px-3 text-center tracking-[0.3em] outline-none ${ok ? "border-accent" : "border-danger"}`}
+        />
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          title="Change the PIN"
+          // Inline: the global `button { font: inherit }` would win over a utility class.
+          style={{ fontSize: 22, fontWeight: 600 }}
+          className="num flex h-11 w-[190px] items-center justify-center rounded-xl border border-line bg-surface-2 tracking-[0.3em] text-ink hover:border-line-strong"
+        >
+          {pin}
+        </button>
+      )}
+      <button
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(pin);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1400);
+          } catch {
+            toast({ tone: "error", title: "Clipboard unavailable" });
+          }
+        }}
+        className="flex size-9 items-center justify-center rounded-lg text-ink-3 hover:bg-surface-3 hover:text-ink"
+        title="Copy the PIN"
+        aria-label="Copy the PIN"
+      >
+        {copied ? <Check size={15} /> : <Copy size={15} />}
+      </button>
+      <button
+        onClick={() => onChange(randomPin())}
+        className="flex size-9 items-center justify-center rounded-lg text-ink-3 hover:bg-surface-3 hover:text-ink"
+        title="New random PIN"
+        aria-label="New random PIN"
+      >
+        <RefreshCw size={15} />
+      </button>
+      <span className="min-w-0 flex-1 text-2xs text-ink-4">{editing ? (ok ? "Enter to save" : "4 to 8 digits") : "Click to change. A new PIN signs everyone out."}</span>
+    </div>
+  );
+}
 
 const EXPIRY = [
   { value: "never", label: "Never" },
@@ -200,6 +282,12 @@ function Detail({ share }: { share: ShareView }) {
             )}
             <p className="mt-auto pt-3 text-[12px] leading-relaxed text-ink-3">
               Scan the code with a phone camera, or open the link on any computer on the same Wi-Fi. No app needed — it opens in the browser.
+              {share.options.pin && (
+                <>
+                  {" "}
+                  They'll be asked for the PIN <b className="num font-semibold text-ink-2">{share.options.pin}</b>.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -221,6 +309,25 @@ function Detail({ share }: { share: ShareView }) {
 
         {/* Options */}
         <div className="mt-5 divide-y divide-line rounded-xl border border-line">
+          <div className="px-3.5 py-3">
+            <label className="flex items-center gap-3">
+              <span className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${share.options.pin ? "bg-[color-mix(in_oklab,var(--accent)_14%,transparent)] text-accent" : "bg-surface-3 text-ink-3"}`}>
+                <KeyRound size={14} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium">Require a PIN</div>
+                <div className="text-2xs text-ink-3">Visitors type it before they see anything. Wrong guesses make them wait.</div>
+              </div>
+              <Toggle on={!!share.options.pin} onChange={(v) => set({ pin: v ? randomPin() : null })} label="Require a PIN" />
+            </label>
+            <AnimatePresence initial={false}>
+              {share.options.pin && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-10">
+                  <PinField pin={share.options.pin} onChange={(pin) => set({ pin })} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <label className="flex items-center gap-3 px-3.5 py-3">
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-medium">Let visitors add files</div>
@@ -286,7 +393,9 @@ function Detail({ share }: { share: ShareView }) {
       </div>
 
       <div className="flex shrink-0 items-center gap-3 border-t border-line px-6 py-3">
-        <p className="min-w-0 flex-1 text-2xs text-ink-4">Only people with the link can open it. Sharing keeps going while 5files is in the menu bar.</p>
+        <p className="min-w-0 flex-1 text-2xs text-ink-4">
+          Only people with the link{share.options.pin ? " and the PIN" : ""} can open it. Sharing keeps going while 5files is in the menu bar.
+        </p>
         <button
           onClick={() => void stopShare(share)}
           className="h-8 shrink-0 rounded-lg border border-line-strong px-3 text-[12.5px] font-medium text-danger hover:border-danger hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"

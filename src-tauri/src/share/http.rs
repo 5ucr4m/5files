@@ -34,7 +34,10 @@ const ICON: &str = include_str!("../../../assets/favicon.svg");
 const PART_SUFFIX: &str = ".5files-part";
 const THUMB_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "ico"];
 
-pub async fn serve(listener: tokio::net::TcpListener, shares: Arc<Shares>, cancel: CancellationToken) {
+pub async fn serve(listener: std::net::TcpListener, shares: Arc<Shares>, cancel: CancellationToken) {
+    // Converted here, on the runtime that runs the server, so the socket outlives
+    // whichever task happened to start sharing.
+    let Ok(listener) = tokio::net::TcpListener::from_std(listener) else { return };
     loop {
         let (stream, peer) = tokio::select! {
             r = listener.accept() => match r {
@@ -190,11 +193,17 @@ async fn handle(shares: Arc<Shares>, ip: IpAddr, req: Request<Incoming>) -> Resp
     share.touch(ip);
     let (route, rel) = sub.split_once('/').unwrap_or((sub, ""));
     let method = req.method().clone();
+    // With a PIN, only the page itself and the PIN check are open; everything else
+    // needs the session cookie a correct PIN sets.
+    if !matches!(route, "" | "pin") && !share.admitted(session_cookie(&req, token).as_deref()) {
+        return pin_required();
+    }
     let res = match (route, &method) {
         ("", &Method::GET) => {
             share.log(ip, "opened", "");
             Ok(page(StatusCode::OK))
         }
+        ("pin", &Method::POST) => check_pin(&share, ip, req).await,
         ("api", &Method::GET) if rel == "list" => list(&share, &query(&req, "p").unwrap_or_default()).await,
         ("f", &Method::GET | &Method::HEAD) => file(&share, ip, rel, &req).await,
         ("t", &Method::GET) => thumb(&shares, &share, rel, query(&req, "s").and_then(|s| s.parse().ok()).unwrap_or(320)).await,
@@ -206,6 +215,59 @@ async fn handle(shares: Arc<Shares>, ip: IpAddr, req: Request<Incoming>) -> Resp
         _ => Err(AppError::NotFound(path.clone())),
     };
     res.unwrap_or_else(|e| error_response(&e))
+}
+
+// ---------------------------------------------------------------- PIN
+
+fn cookie_name(token: &str) -> String {
+    format!("5f_{token}")
+}
+
+fn session_cookie(req: &Request<Incoming>, token: &str) -> Option<String> {
+    let want = cookie_name(token);
+    req.headers().get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()).flat_map(|v| v.split(';')).find_map(|kv| {
+        let (k, v) = kv.trim().split_once('=')?;
+        (k == want).then(|| v.to_string())
+    })
+}
+
+fn pin_required() -> Response<Body> {
+    let mut r = json(&serde_json::json!({ "pin": true, "host": super::computer_name() }));
+    *r.status_mut() = StatusCode::UNAUTHORIZED;
+    r
+}
+
+async fn check_pin(share: &Arc<Share>, ip: IpAddr, req: Request<Incoming>) -> AppResult<Response<Body>> {
+    let body = http_body_util::Limited::new(req.into_body(), 1024)
+        .collect()
+        .await
+        .map_err(|_| AppError::Invalid("bad request".into()))?
+        .to_bytes();
+    let typed = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("pin").and_then(|p| p.as_str()).map(|p| p.trim().to_string()))
+        .unwrap_or_default();
+    let reply = |code: StatusCode, v: serde_json::Value| {
+        let mut r = json(&v);
+        *r.status_mut() = code;
+        r
+    };
+    Ok(match share.try_pin(ip, &typed) {
+        super::PinCheck::Ok(session) => {
+            let mut r = reply(StatusCode::OK, serde_json::json!({ "ok": true }));
+            let cookie = format!("{}={session}; Path=/s/{}/; HttpOnly; SameSite=Strict", cookie_name(&share.token), share.token);
+            r.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
+            r
+        }
+        super::PinCheck::Wrong { tries_left } => {
+            reply(StatusCode::UNAUTHORIZED, serde_json::json!({ "ok": false, "triesLeft": tries_left }))
+        }
+        super::PinCheck::Locked(secs) => {
+            let mut r = reply(StatusCode::TOO_MANY_REQUESTS, serde_json::json!({ "ok": false, "retryIn": secs }));
+            r.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(secs));
+            r
+        }
+    })
 }
 
 // ---------------------------------------------------------------- paths

@@ -33,7 +33,7 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareOptions {
     /// Visitors may add files (never delete or overwrite).
@@ -41,6 +41,27 @@ pub struct ShareOptions {
     pub show_hidden: bool,
     /// Stop sharing automatically after this many minutes (from now).
     pub expires_in_mins: Option<u64>,
+    /// Visitors must type this (4–8 digits) before they see anything.
+    #[serde(default)]
+    pub pin: Option<String>,
+}
+
+pub fn valid_pin(pin: &str) -> bool {
+    (4..=8).contains(&pin.len()) && pin.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Wrong PINs allowed from one address before it has to wait.
+const PIN_TRIES: u32 = 5;
+
+/// Outcome of a PIN attempt.
+pub enum PinCheck {
+    /// Right PIN: the visitor's new session id (goes in a cookie).
+    Ok(String),
+    Wrong {
+        tries_left: u32,
+    },
+    /// Too many wrong tries: seconds until this address may try again.
+    Locked(u64),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -48,7 +69,7 @@ pub struct ShareOptions {
 pub struct Activity {
     pub at: i64,
     pub who: String,
-    /// "opened" | "downloaded" | "zip" | "uploaded"
+    /// "opened" | "unlocked" | "wrongPin" | "downloaded" | "zip" | "uploaded"
     pub action: &'static str,
     pub name: String,
 }
@@ -69,6 +90,10 @@ pub struct Share {
     pub created: i64,
     opts: Mutex<(ShareOptions, Option<i64>)>,
     stats: Mutex<Stats>,
+    /// Visitors who entered the PIN (session ids); cleared when the PIN changes.
+    sessions: Mutex<std::collections::HashSet<String>>,
+    /// Wrong PIN attempts per address: (count, locked until ms).
+    attempts: Mutex<HashMap<IpAddr, (u32, i64)>>,
     pub bytes_out: AtomicU64,
     pub bytes_in: AtomicU64,
     /// Downloads / uploads in flight right now.
@@ -80,7 +105,55 @@ pub struct Share {
 
 impl Share {
     pub fn options(&self) -> ShareOptions {
-        self.opts.lock().0
+        self.opts.lock().0.clone()
+    }
+
+    pub fn needs_pin(&self) -> bool {
+        self.opts.lock().0.pin.is_some()
+    }
+
+    /// Whether a visitor's session (from their cookie) may see the share.
+    pub fn admitted(&self, session: Option<&str>) -> bool {
+        !self.needs_pin() || session.is_some_and(|s| self.sessions.lock().contains(s))
+    }
+
+    /// Checks a PIN typed by a visitor. Five wrong tries lock that address out for 30 s,
+    /// doubling with every further round (up to 15 min), so guessing isn't practical.
+    pub fn try_pin(&self, ip: IpAddr, typed: &str) -> PinCheck {
+        let Some(pin) = self.opts.lock().0.pin.clone() else {
+            return PinCheck::Ok(new_session());
+        };
+        let now = now_ms();
+        let mut attempts = self.attempts.lock();
+        let entry = attempts.entry(ip).or_insert((0, 0));
+        if entry.1 > now {
+            return PinCheck::Locked(((entry.1 - now) as u64).div_ceil(1000));
+        }
+        // Compare without an early exit (no timing hints).
+        let same = typed.len() == pin.len() && typed.bytes().zip(pin.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0;
+        if same {
+            attempts.remove(&ip);
+            drop(attempts);
+            let session = new_session();
+            self.sessions.lock().insert(session.clone());
+            self.log(ip, "unlocked", "");
+            return PinCheck::Ok(session);
+        }
+        entry.0 += 1;
+        let tries_left = PIN_TRIES - (entry.0 - 1) % PIN_TRIES - 1;
+        let lock_secs = (tries_left == 0).then(|| {
+            let round = entry.0 / PIN_TRIES;
+            (30u64 << (round - 1).min(5)).min(15 * 60)
+        });
+        if let Some(secs) = lock_secs {
+            entry.1 = now + secs as i64 * 1000;
+        }
+        drop(attempts);
+        self.log(ip, "wrongPin", "");
+        match lock_secs {
+            Some(secs) => PinCheck::Locked(secs),
+            None => PinCheck::Wrong { tries_left },
+        }
     }
 
     fn expires_at(&self) -> Option<i64> {
@@ -245,6 +318,20 @@ fn mdns_host() -> Option<&'static str> {
     HOST.as_deref()
 }
 
+fn check_options(o: &ShareOptions) -> crate::error::AppResult<()> {
+    match &o.pin {
+        Some(p) if !valid_pin(p) => Err(crate::error::AppError::Invalid("The PIN must be 4 to 8 digits.".into())),
+        _ => Ok(()),
+    }
+}
+
+fn new_session() -> String {
+    use rand::RngCore;
+    let mut b = [0u8; 24];
+    rand::rng().fill_bytes(&mut b);
+    hex::encode(b)
+}
+
 fn new_token() -> String {
     use rand::Rng;
     // No look-alikes (0/o, 1/l): links get read aloud and typed on phones. 12 × 5 bits.
@@ -292,7 +379,7 @@ impl Shares {
         };
         let mut last_err = None;
         for port in candidates {
-            match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
+            match std::net::TcpListener::bind(("0.0.0.0", port)) {
                 Ok(l) => {
                     listener = Some(l);
                     break;
@@ -302,6 +389,8 @@ impl Shares {
         }
         let listener = listener.ok_or_else(|| last_err.unwrap_or_else(|| std::io::Error::other("no free port")))?;
         let port = listener.local_addr()?.port();
+        // Registered with the reactor inside the server task (see `http::serve`).
+        listener.set_nonblocking(true)?;
         let cancel = CancellationToken::new();
         tauri::async_runtime::spawn(http::serve(listener, self.clone(), cancel.clone()));
         self.port.store(port as u32, Ordering::Relaxed);
@@ -332,6 +421,7 @@ impl Shares {
         if let Some(s) = existing {
             return Ok(self.view_of(&s, &Addresses::now()));
         }
+        check_options(&opts)?;
         self.ensure_server().await.map_err(|e| crate::error::AppError::Other(format!("couldn't start the sharing server: {e}")))?;
         let token = new_token();
         let share = Arc::new(Share {
@@ -341,8 +431,10 @@ impl Shares {
             root,
             provider,
             created: now_ms(),
-            opts: Mutex::new((opts, opts.expires_in_mins.map(|m| now_ms() + m as i64 * 60_000))),
+            opts: Mutex::new((opts.clone(), opts.expires_in_mins.map(|m| now_ms() + m as i64 * 60_000))),
             stats: Default::default(),
+            sessions: Default::default(),
+            attempts: Default::default(),
             bytes_out: AtomicU64::new(0),
             bytes_in: AtomicU64::new(0),
             active: AtomicU32::new(0),
@@ -356,8 +448,14 @@ impl Shares {
 
     pub fn update(&self, token: &str, opts: ShareOptions) -> crate::error::AppResult<ShareView> {
         let share = self.get(token).ok_or_else(|| crate::error::AppError::NotFound("share".into()))?;
+        check_options(&opts)?;
         {
             let mut o = share.opts.lock();
+            // A new PIN signs everyone out.
+            if o.0.pin != opts.pin {
+                share.sessions.lock().clear();
+                share.attempts.lock().clear();
+            }
             // Only a changed expiry restarts the countdown.
             let expires =
                 if o.0.expires_in_mins == opts.expires_in_mins { o.1 } else { opts.expires_in_mins.map(|m| now_ms() + m as i64 * 60_000) };
@@ -414,7 +512,7 @@ impl Shares {
         let port = self.port();
         let link = |host: &str| format!("http://{host}:{port}/s/{}/", s.token);
         let url = link(&addr.primary);
-        let (opts, expires_at) = *s.opts.lock();
+        let (opts, expires_at) = s.opts.lock().clone();
         let st = s.stats.lock();
         ShareView {
             id: s.token.clone(),

@@ -172,3 +172,64 @@ async fn stopping_the_last_share_closes_the_server() {
     let r = reqwest::Client::new().get(format!("http://127.0.0.1:{port}/s/{}/f/notes.txt", f.id)).send().await;
     assert!(r.map(|r| r.status() == 404).unwrap_or(true));
 }
+
+#[tokio::test]
+async fn pin_guards_everything_and_resists_guessing() {
+    let f = setup(ShareOptions { pin: Some("482913".into()), ..Default::default() }).await;
+    let get = |u: String, cookie: Option<String>| {
+        let mut r = f.http.get(u);
+        if let Some(c) = cookie {
+            r = r.header("cookie", c);
+        }
+        r.send()
+    };
+    let pin = |p: &'static str| f.http.post(format!("{}/pin", f.base)).body(format!("{{\"pin\":\"{p}\"}}")).send();
+
+    // The page loads (it asks for the PIN); nothing else does.
+    assert_eq!(get(format!("{}/", f.base), None).await.unwrap().status(), 200);
+    for u in ["/api/list?p=", "/f/notes.txt", "/zip/", "/t/notes.txt"] {
+        let r = get(format!("{}{u}", f.base), None).await.unwrap();
+        assert_eq!(r.status(), 401, "{u}");
+    }
+    let r = get(format!("{}/api/list?p=", f.base), None).await.unwrap();
+    assert_eq!(r.json::<serde_json::Value>().await.unwrap()["pin"], true);
+
+    // Wrong PINs count down, then the address has to wait.
+    for left in [4, 3, 2, 1] {
+        let r = pin("000000").await.unwrap();
+        assert_eq!(r.status(), 401);
+        assert_eq!(r.json::<serde_json::Value>().await.unwrap()["triesLeft"], left);
+    }
+    let r = pin("000000").await.unwrap();
+    assert_eq!(r.status(), 429);
+    assert_eq!(r.json::<serde_json::Value>().await.unwrap()["retryIn"], 30);
+    // Even the right PIN is refused while locked.
+    assert_eq!(pin("482913").await.unwrap().status(), 429);
+    assert!(f.shares.views()[0].activity.iter().any(|a| a.action == "wrongPin"));
+
+    // A fresh share (no lockout): the right PIN sets a session cookie that opens everything.
+    let f2 = setup(ShareOptions { pin: Some("4829".into()), ..Default::default() }).await;
+    let r = f2.http.post(format!("{}/pin", f2.base)).body(r#"{"pin":"4829"}"#).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let set = r.headers()["set-cookie"].to_str().unwrap().to_string();
+    assert!(set.contains("HttpOnly") && set.contains("SameSite=Strict") && set.contains(&format!("Path=/s/{}/", f2.id)), "{set}");
+    let cookie = set.split(';').next().unwrap().to_string();
+    let ok = |u: &str| {
+        let (http, base, c) = (f2.http.clone(), f2.base.clone(), cookie.clone());
+        let u = u.to_string();
+        async move { http.get(format!("{base}{u}")).header("cookie", c).send().await.unwrap().status() }
+    };
+    assert_eq!(ok("/api/list?p=").await, 200);
+    assert_eq!(ok("/f/notes.txt").await, 200);
+    assert!(f2.shares.views()[0].activity.iter().any(|a| a.action == "unlocked"));
+
+    // Changing the PIN signs everyone out.
+    f2.shares.update(&f2.id, ShareOptions { pin: Some("1111".into()), ..Default::default() }).unwrap();
+    assert_eq!(ok("/api/list?p=").await, 401);
+    // Turning it off opens the share again.
+    f2.shares.update(&f2.id, ShareOptions::default()).unwrap();
+    assert_eq!(f2.http.get(format!("{}/api/list?p=", f2.base)).send().await.unwrap().status(), 200);
+    // Bad PINs are rejected when set.
+    assert!(f2.shares.update(&f2.id, ShareOptions { pin: Some("12a4".into()), ..Default::default() }).is_err());
+    assert!(f2.shares.update(&f2.id, ShareOptions { pin: Some("123".into()), ..Default::default() }).is_err());
+}

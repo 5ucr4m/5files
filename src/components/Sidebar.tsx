@@ -399,6 +399,7 @@ export function Sidebar() {
               onClick={() => useUi.getState().set({ panel: "share", shareView: s.id })}
               below={
                 <span className="block truncate text-[10.5px] text-ink-4">
+                  {s.options.pin ? "PIN · " : ""}
                   {s.active > 0 ? "Sending…" : s.visitors ? `${s.visitors} ${s.visitors === 1 ? "device" : "devices"} · ${formatBytes(s.bytesOut)} sent` : "Waiting for visitors"}
                 </span>
               }
