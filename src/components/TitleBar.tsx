@@ -1,8 +1,10 @@
-import { Cloud, HardDrive, Minus, Plus, Search, Server, Square, X } from "lucide-react";
+import { Cloud, Columns2, HardDrive, Maximize2, Minus, Plus, Search, Server, Square, X } from "lucide-react";
 import { AnimatePresence, Reorder, motion } from "motion/react";
 import { api } from "../lib/api";
 import { isMac, kbd } from "../lib/platform";
 import { useDrives } from "../store/live";
+import { panesOf } from "../lib/layout";
+import { useLayout, type Workspace } from "../store/layout";
 import { useTabs, type Tab } from "../store/tabs";
 import { useUi } from "../store/ui";
 import { FolderGlyph } from "./FileIcon";
@@ -32,24 +34,27 @@ function TabIcon({ t }: { t: Tab }) {
   return <FolderGlyph size={15} />;
 }
 
-function TabPill({ t, active }: { t: Tab; active: boolean }) {
-  const conn = useDrives((s) => s.connections.find((c) => c.id === t.fs));
-  const { activate, closeTab } = useTabs.getState();
+function TabPill({ ws, active }: { ws: Workspace; active: boolean }) {
+  const t = useTabs((s) => s.tabs.find((x) => x.id === ws.focus));
+  const conn = useDrives((s) => s.connections.find((c) => c.id === t?.fs));
+  const panes = panesOf(ws.root).length;
+  const L = useLayout.getState();
+  if (!t) return null;
   const title = tabTitle(t, conn?.name);
   return (
     <Reorder.Item
-      value={t.id}
-      id={t.id}
+      value={ws.id}
+      id={ws.id}
       layout="position"
       initial={{ opacity: 0, scale: 0.9, width: 0 }}
       animate={{ opacity: 1, scale: 1, width: "auto" }}
       exit={{ opacity: 0, scale: 0.9, width: 0, transition: { duration: 0.14 } }}
       transition={{ type: "spring", stiffness: 600, damping: 40 }}
       whileDrag={{ scale: 1.03, zIndex: 10 }}
-      onPointerDown={() => activate(t.id)}
-      onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+      onPointerDown={() => L.activate(ws.id)}
+      onAuxClick={(e) => e.button === 1 && L.closeWorkspace(ws.id)}
       className="no-drag group relative flex h-[30px] max-w-[220px] min-w-[96px] shrink cursor-default items-center"
-      title={t.path}
+      title={panes > 1 ? `${panes} panes${ws.zoom ? " (one zoomed)" : ""} · ${t.path}` : t.path}
     >
       {active && (
         <motion.div
@@ -63,10 +68,20 @@ function TabPill({ t, active }: { t: Tab; active: boolean }) {
           <TabIcon t={t} />
         </span>
         <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{title}</span>
+        {panes > 1 && (
+          <motion.span
+            initial={{ scale: 0.6, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className={`num flex h-[16px] shrink-0 items-center gap-0.5 rounded-[5px] px-1 text-[10px] font-semibold ${active ? "bg-sel text-accent" : "bg-surface-3 text-ink-3"}`}
+          >
+            {ws.zoom ? <Maximize2 size={9} strokeWidth={2.6} /> : <Columns2 size={10} strokeWidth={2.4} />}
+            {panes}
+          </motion.span>
+        )}
         {t.loading && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent" />}
         <button
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => closeTab(t.id)}
+          onClick={() => L.closeWorkspace(ws.id)}
           aria-label={`Close ${title}`}
           className={`flex size-[18px] shrink-0 items-center justify-center rounded-[5px] text-ink-3 hover:bg-surface-3 hover:text-ink ${active ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
         >
@@ -96,15 +111,11 @@ function WindowControls() {
 }
 
 export function TitleBar() {
-  const tabs = useTabs((s) => s.tabs);
+  const workspaces = useLayout((s) => s.workspaces);
+  const activeWs = useLayout((s) => s.active);
   const active = useTabs((s) => s.active);
-  const order = tabs.map((t) => t.id);
+  const order = workspaces.map((w) => w.id);
   const mac = isMac();
-
-  const onReorder = (ids: string[]) => {
-    const byId = new Map(tabs.map((t) => [t.id, t]));
-    useTabs.setState({ tabs: ids.map((id) => byId.get(id)!).filter(Boolean) });
-  };
 
   return (
     <header
@@ -114,10 +125,10 @@ export function TitleBar() {
       {/* Double-click to maximize is handled by Tauri's drag region itself. */}
       {/* macOS traffic lights sit here (overlay title bar). */}
       <div className={mac ? "w-[78px] shrink-0" : "w-2 shrink-0"} data-tauri-drag-region />
-      <Reorder.Group axis="x" values={order} onReorder={onReorder} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" data-tauri-drag-region>
+      <Reorder.Group axis="x" values={order} onReorder={(ids) => useLayout.getState().reorder(ids)} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" data-tauri-drag-region>
         <AnimatePresence initial={false}>
-          {tabs.map((t) => (
-            <TabPill key={t.id} t={t} active={t.id === active} />
+          {workspaces.map((w) => (
+            <TabPill key={w.id} ws={w} active={w.id === activeWs} />
           ))}
         </AnimatePresence>
         <motion.button

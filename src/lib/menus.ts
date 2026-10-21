@@ -16,9 +16,14 @@ import {
   CopyPlus,
   ExternalLink,
   Ruler,
+  PanelsLeftRight,
+  ArrowRightLeft,
+  Columns2,
+  Rows2,
 } from "lucide-react";
 import { api } from "./api";
-import { copySelection, deleteSelection, newFile, newFolder, openEntry, paste, selectedEntries, transfer } from "./ops";
+import { copySelection, deleteSelection, newFile, newFolder, openEntry, paste, selectedEntries, sendToOtherPane, transfer } from "./ops";
+import { otherPane, useLayout } from "../store/layout";
 import { isMac, kbd } from "./platform";
 import { measureFolders } from "./sizes";
 import type { Entry } from "./types";
@@ -59,6 +64,15 @@ export function itemMenu(tab: Tab, entry: Entry): MenuItem[] {
     run: () => transfer("copy", sel.map((e) => ({ fs: tab.fs, path: e.path })), { fs: tab.fs, path: tab.path }),
   });
   if (!many) items.push({ label: "Rename", icon: Pencil, shortcut: "F2", run: () => useTabs.getState().patch(tab.id, { renaming: entry.path }) });
+  // Split view: send the selection straight to the folder open in the other pane.
+  const other = otherPane(tab.id);
+  const otherTab = other ? useTabs.getState().tabs.find((t) => t.id === other) : undefined;
+  if (otherTab && !otherTab.search) {
+    const where = otherTab.listing?.crumbs.at(-1)?.name || otherTab.path;
+    items.push({ divider: true });
+    items.push({ label: `Copy to “${where}”`, icon: PanelsLeftRight, shortcut: "F5", run: () => sendToOtherPane(tab, "copy") });
+    items.push({ label: `Move to “${where}”`, icon: ArrowRightLeft, shortcut: "F6", run: () => sendToOtherPane(tab, "move") });
+  }
   items.push({ divider: true });
   if (entry.isDir && !many) {
     const fav = useSettings.getState().favorites.some((f) => f.fs === tab.fs && f.path === entry.path);
@@ -98,6 +112,9 @@ export function backgroundMenu(tab: Tab): MenuItem[] {
     { label: tab.view === "list" ? "View as icons" : "View as list", run: () => patch(tab.id, { view: tab.view === "list" ? "grid" : "list" }) },
     { label: s.showHidden ? "Hide hidden files" : "Show hidden files", shortcut: kbd("Mod+Shift+."), run: () => s.set({ showHidden: !s.showHidden }) },
     { label: "Refresh", icon: RefreshCw, shortcut: isMac() ? "⌘R" : "F5", run: () => refresh(tab.id) },
+    { divider: true },
+    { label: "Split right", icon: Columns2, shortcut: kbd("Mod+\\"), run: () => useLayout.getState().split("row") },
+    { label: "Split down", icon: Rows2, shortcut: kbd("Mod+Shift+\\"), run: () => useLayout.getState().split("col") },
     { divider: true },
     { label: "Copy folder path", icon: Link2, run: () => copyText(tab.path, "path") },
     ...(tab.fs === "local" ? [{ label: revealLabel(), icon: ExternalLink, run: () => api().reveal(tab.path) }] : []),

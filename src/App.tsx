@@ -2,15 +2,14 @@ import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { useEffect } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConnectionsPanel } from "./components/Connections";
-import { FileView } from "./components/FileView";
 import { ConfirmDialog, ConflictDialog, ContextMenu, Modal, Toasts } from "./components/Overlays";
 import { PreviewPane, QuickLook } from "./components/Preview";
 import { SettingsPanel } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
-import { StatusBar } from "./components/StatusBar";
 import { TitleBar } from "./components/TitleBar";
-import { Toolbar } from "./components/Toolbar";
 import { TransferPanel } from "./components/Transfers";
+import { PrefixHud, Workspace } from "./components/Workspace";
+import { useLayout } from "./store/layout";
 import { api } from "./lib/api";
 import { fsName, plural, transfer } from "./lib/ops";
 import { isMac, isMod } from "./lib/platform";
@@ -89,10 +88,67 @@ function useBackendEvents() {
   }, []);
 }
 
+const ARROWS: Record<string, "left" | "right" | "up" | "down"> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+
+/** tmux keys after the Ctrl+B prefix. Returns false for keys it doesn't know. */
+function prefixCommand(e: KeyboardEvent): boolean {
+  const L = useLayout.getState();
+  const tabs = useTabs.getState();
+  // e.key first (works on every layout); the physical key covers synthetic events.
+  if (e.key === "%" || (e.shiftKey && e.code === "Digit5")) L.split("row");
+  else if (e.key === '"' || e.key === "'" || (e.shiftKey && e.code === "Quote")) L.split("col");
+  else if (ARROWS[e.key]) L.move(ARROWS[e.key]);
+  else if (e.key === "o") L.next(1);
+  else if (e.key === ";") L.next(-1);
+  else if (e.key === "z") L.toggleZoom();
+  else if (e.key === "x") {
+    const t = activeTab();
+    if (t) tabs.closeTab(t.id);
+  } else if (e.key === "c") {
+    const t = activeTab();
+    tabs.newTab(t ? { fs: t.fs, path: t.path } : undefined, { afterId: t?.id });
+  } else if (e.key === "n") L.cycle(1);
+  else if (e.key === "p") L.cycle(-1);
+  else if (/^[1-9]$/.test(e.key)) {
+    const w = L.workspaces[Number(e.key) - 1];
+    if (w) L.activate(w.id);
+  } else return false;
+  return true;
+}
+
 function useShortcuts() {
   useEffect(() => {
+    let prefixTimer: ReturnType<typeof setTimeout> | undefined;
+    const setPrefix = (on: boolean) => {
+      clearTimeout(prefixTimer);
+      useLayout.getState().setPrefix(on);
+      if (on) prefixTimer = setTimeout(() => useLayout.getState().setPrefix(false), 2500);
+    };
+    // Capture phase: the tmux prefix must win over every other key handler.
+    const onPrefix = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement).closest("input, textarea, select, [contenteditable]");
+      const ui = useUi.getState();
+      if (typing || ui.palette || ui.confirm || ui.conflict) return;
+      const swallow = () => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      };
+      if (useLayout.getState().prefix) {
+        if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+        swallow();
+        setPrefix(false);
+        if (e.key !== "Escape") prefixCommand(e);
+        return;
+      }
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "b") {
+        swallow();
+        setPrefix(true);
+      }
+    };
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       const tabs = useTabs.getState();
+      const L = useLayout.getState();
       const ui = useUi.getState();
       const s = useSettings.getState();
       const t = activeTab();
@@ -106,12 +162,17 @@ function useShortcuts() {
       if (mod && k === "k") return stop(), ui.set({ palette: !ui.palette });
       if (ui.palette || ui.confirm || ui.conflict) return;
       if (mod && k === "t") return stop(), tabs.newTab(t ? { fs: t.fs, path: t.path } : undefined, { afterId: t?.id });
+      // Closes the focused pane when the tab is split, the tab otherwise.
       if (mod && k === "w") return stop(), t && tabs.closeTab(t.id);
-      if ((e.ctrlKey && k === "tab") || (mod && e.shiftKey && (e.key === "]" || e.key === "}"))) return stop(), tabs.cycle(e.shiftKey && k === "tab" ? -1 : 1);
-      if (mod && e.shiftKey && (e.key === "[" || e.key === "{")) return stop(), tabs.cycle(-1);
+      // Direct split shortcuts (no prefix): Mod+\ side by side, Mod+Shift+\ stacked.
+      if (mod && !e.altKey && (e.key === "\\" || e.key === "|" || e.code === "Backslash")) return stop(), L.split(e.shiftKey ? "col" : "row");
+      if (mod && e.altKey && ARROWS[e.key]) return stop(), L.move(ARROWS[e.key]);
+      if (mod && e.shiftKey && e.key === "Enter") return stop(), L.toggleZoom();
+      if ((e.ctrlKey && k === "tab") || (mod && e.shiftKey && (e.key === "]" || e.key === "}"))) return stop(), L.cycle(e.shiftKey && k === "tab" ? -1 : 1);
+      if (mod && e.shiftKey && (e.key === "[" || e.key === "{")) return stop(), L.cycle(-1);
       if (mod && !e.shiftKey && /^[1-9]$/.test(e.key) && e.altKey) {
-        const target = tabs.tabs[Number(e.key) - 1];
-        return stop(), target && tabs.activate(target.id);
+        const target = L.workspaces[Number(e.key) - 1];
+        return stop(), target && L.activate(target.id);
       }
       if (mod && !e.shiftKey && e.key === "1") return stop(), t && tabs.patch(t.id, { view: "list" });
       if (mod && !e.shiftKey && e.key === "2") return stop(), t && tabs.patch(t.id, { view: "grid" });
@@ -133,9 +194,12 @@ function useShortcuts() {
       if (e.button === 3) (e.preventDefault(), useTabs.getState().back(t.id));
       if (e.button === 4) (e.preventDefault(), useTabs.getState().forward(t.id));
     };
+    window.addEventListener("keydown", onPrefix, true);
     window.addEventListener("keydown", onKey);
     window.addEventListener("mouseup", onMouse);
     return () => {
+      clearTimeout(prefixTimer);
+      window.removeEventListener("keydown", onPrefix, true);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mouseup", onMouse);
     };
@@ -195,26 +259,21 @@ export default function App() {
         <div className="flex min-h-0 flex-1">
           <Sidebar />
           <SidebarResizer />
-          <main className="mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
-            {tab && (
-              <>
-                <Toolbar tab={tab} />
-                <div className="flex min-h-0 flex-1">
-                  <div className="relative min-w-0 flex-1">
-                    {tab.loading && !tab.listing && <div className="indeterminate absolute inset-x-0 top-0 z-20 h-[2px] overflow-hidden" />}
-                    <FileView key={tab.id} tab={tab} />
-                  </div>
-                  <AnimatePresence initial={false}>
-                    {preview && (
-                      <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 300, opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ type: "spring", stiffness: 500, damping: 42 }} className="flex overflow-hidden">
-                        <PreviewPane />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-                <StatusBar tab={tab} />
-              </>
-            )}
+          <main className="mr-2 mb-2 flex min-w-0 flex-1 gap-[6px] overflow-hidden">
+            <Workspace />
+            <AnimatePresence initial={false}>
+              {preview && tab && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 300, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 500, damping: 42 }}
+                  className="flex overflow-hidden rounded-xl border border-line bg-surface shadow-soft"
+                >
+                  <PreviewPane />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </main>
         </div>
 
@@ -242,6 +301,7 @@ export default function App() {
           <SettingsPanel />
         </Modal>
 
+        <PrefixHud />
         <QuickLook />
         <CommandPalette />
         <ConfirmDialog />

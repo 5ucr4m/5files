@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { api, errorMessage } from "../lib/api";
 import type { Sort } from "../lib/format";
 import type { Entry, FsId, Listing, Loc } from "../lib/types";
+import type { LayoutNode } from "../lib/layout";
+import { mapPanes } from "../lib/layout";
+import { useLayout, workspaceOf } from "./layout";
 import { useSettings, type ViewMode } from "./settings";
 
 export interface SearchState {
@@ -36,15 +39,24 @@ export interface Tab {
   nav: number;
 }
 
+/**
+ * Pane state. Each "tab" in the title bar is a workspace (see store/layout) holding one
+ * or more panes; `Tab` here is one pane, and `active` is the focused pane.
+ */
 interface TabsState {
   tabs: Tab[];
   active: string;
+  /** Opens a new title-bar tab with one pane; returns the pane id. */
   newTab: (loc?: Loc, opts?: { background?: boolean; afterId?: string }) => string;
+  /** Creates pane state only (the layout decides where it goes). */
+  createPane: (loc: Loc, view?: ViewMode) => string;
+  /** Forgets panes that were closed. */
+  dropPanes: (ids: string[]) => void;
+  /** Closes a pane (or its tab, when it is the only pane). */
   closeTab: (id: string) => void;
   closeOthers: (id: string) => void;
   activate: (id: string) => void;
   cycle: (delta: number) => void;
-  moveTab: (from: number, to: number) => void;
   navigate: (id: string, loc: Loc, opts?: { push?: boolean; select?: string }) => Promise<void>;
   back: (id: string) => void;
   forward: (id: string) => void;
@@ -55,7 +67,7 @@ interface TabsState {
   select: (id: string, paths: string[], opts?: { anchor?: string | null; focus?: string | null }) => void;
 }
 
-const SESSION_KEY = "5files.session.v1";
+const SESSION_KEY = "5files.session.v2";
 let counter = 0;
 const tabId = () => `t${Date.now().toString(36)}${(counter++).toString(36)}`;
 
@@ -124,50 +136,32 @@ export const useTabs = create<TabsState>((set, get) => {
   return {
     tabs: [],
     active: "",
-    newTab(loc, opts) {
-      const target = loc ?? { fs: "local", path: "" };
-      const t = blank(target);
-      set((s) => {
-        const tabs = [...s.tabs];
-        const after = opts?.afterId ? tabs.findIndex((x) => x.id === opts.afterId) : -1;
-        tabs.splice(after >= 0 ? after + 1 : tabs.length, 0, t);
-        return { tabs, active: opts?.background ? s.active || t.id : t.id };
-      });
-      void load(t.id, target);
+    createPane(loc, view) {
+      const t = { ...blank(loc), ...(view ? { view } : {}) };
+      set((s) => ({ tabs: [...s.tabs, t] }));
+      void load(t.id, loc);
       return t.id;
     },
+    newTab(loc, opts) {
+      const id = get().createPane(loc ?? { fs: "local", path: "" });
+      useLayout.getState().add(id, { background: opts?.background, afterPane: opts?.afterId });
+      return id;
+    },
+    dropPanes(ids) {
+      const gone = new Set(ids);
+      get().tabs.filter((t) => gone.has(t.id)).forEach(stopSearch);
+      ids.forEach((id) => reqSeq.delete(id));
+      set((s) => ({ tabs: s.tabs.filter((t) => !gone.has(t.id)) }));
+    },
     closeTab(id) {
-      const { tabs, active } = get();
-      if (tabs.length === 1) {
-        // Closing the last tab resets it to home instead of leaving an empty window.
-        const t = tabs[0];
-        void get().navigate(t.id, { fs: "local", path: "" });
-        return;
-      }
-      const i = tabs.findIndex((t) => t.id === id);
-      stopSearch(tabs[i]);
-      const next = tabs.filter((t) => t.id !== id);
-      set({ tabs: next, active: active === id ? next[Math.min(i, next.length - 1)].id : active });
-      reqSeq.delete(id);
+      useLayout.getState().requestClose(id);
     },
     closeOthers(id) {
-      get().tabs.filter((t) => t.id !== id).forEach(stopSearch);
-      set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), active: id }));
+      const ws = workspaceOf(id);
+      if (ws) useLayout.getState().closeOthers(ws.id);
     },
-    activate: (id) => set({ active: id }),
-    cycle(delta) {
-      const { tabs, active } = get();
-      const i = tabs.findIndex((t) => t.id === active);
-      set({ active: tabs[(i + delta + tabs.length) % tabs.length].id });
-    },
-    moveTab(from, to) {
-      set((s) => {
-        const tabs = [...s.tabs];
-        const [t] = tabs.splice(from, 1);
-        tabs.splice(to, 0, t);
-        return { tabs };
-      });
-    },
+    activate: (id) => useLayout.getState().focusPane(id),
+    cycle: (delta) => useLayout.getState().cycle(delta),
     async navigate(id, loc, opts) {
       const push = opts?.push ?? true;
       stopSearch(get().tabs.find((t) => t.id === id));
@@ -233,34 +227,70 @@ export function activeTab(): Tab | undefined {
   return s.tabs.find((t) => t.id === s.active);
 }
 
+interface SavedPane extends Loc {
+  view?: ViewMode;
+}
+interface SavedSession {
+  v: 2;
+  workspaces: { root: LayoutNode; focus: string }[];
+  panes: Record<string, SavedPane>;
+  active: number;
+}
+
 export function restoreSession() {
-  let saved: { tabs: (Loc & { view?: ViewMode })[]; active: number } | null = null;
+  // Subscribed here (not at module load): tabs and layout import each other.
+  useTabs.subscribe(saveSession);
+  useLayout.subscribe(saveSession);
+  let saved: SavedSession | null = null;
   try {
-    saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    const raw = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    saved = raw?.v === 2 ? raw : null;
   } catch {
     saved = null;
   }
   const s = useTabs.getState();
-  if (saved?.tabs?.length) {
-    const ids = saved.tabs.map((l) => s.newTab({ fs: l.fs, path: l.path }, { background: true }));
-    saved.tabs.forEach((l, i) => l.view && s.patch(ids[i], { view: l.view }));
-    useTabs.setState({ active: ids[Math.min(saved.active, ids.length - 1)] ?? ids[0] });
-  } else {
+  if (!saved?.workspaces?.length) {
     s.newTab();
+    return;
   }
+  const layout = useLayout.getState();
+  const ids: string[] = [];
+  for (const w of saved.workspaces) {
+    const remap = new Map<string, string>();
+    const root = mapPanes(w.root, (old) => {
+      const p = saved!.panes[old] ?? { fs: "local", path: "" };
+      const id = s.createPane({ fs: p.fs, path: p.path }, p.view);
+      remap.set(old, id);
+      return id;
+    });
+    const first = remap.get(w.focus) ?? [...remap.values()][0];
+    layout.add(first, { background: true });
+    const ws = useLayout.getState().workspaces.at(-1)!;
+    useLayout.setState((st) => ({
+      workspaces: st.workspaces.map((x) => (x.id === ws.id ? { ...x, root, focus: first, history: [first] } : x)),
+    }));
+    ids.push(ws.id);
+  }
+  layout.activate(ids[Math.min(saved.active, ids.length - 1)] ?? ids[0]);
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
-useTabs.subscribe((s) => {
+function saveSession() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    const { workspaces, active } = useLayout.getState();
+    const panes: Record<string, SavedPane> = {};
+    for (const t of useTabs.getState().tabs) panes[t.id] = { fs: t.fs, path: t.path, view: t.view };
+    const data: SavedSession = {
+      v: 2,
+      workspaces: workspaces.map((w) => ({ root: w.root, focus: w.focus })),
+      panes,
+      active: workspaces.findIndex((w) => w.id === active),
+    };
     try {
-      localStorage.setItem(
-        SESSION_KEY,
-        JSON.stringify({ tabs: s.tabs.map((t) => ({ fs: t.fs, path: t.path, view: t.view })), active: s.tabs.findIndex((t) => t.id === s.active) }),
-      );
+      localStorage.setItem(SESSION_KEY, JSON.stringify(data));
     } catch {
       /* ignore */
     }
   }, 400);
-});
+}

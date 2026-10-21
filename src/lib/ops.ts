@@ -6,6 +6,7 @@ import { activeTab, useTabs, type Tab } from "../store/tabs";
 import { confirmDialog, conflictDialog, toast, useUi } from "../store/ui";
 import { useSettings } from "../store/settings";
 import { useDrives } from "../store/live";
+import { otherPane } from "../store/layout";
 import { kbd } from "./platform";
 
 export function selectedEntries(t: Tab | undefined): Entry[] {
@@ -202,4 +203,17 @@ export async function uploadDropped(dest: Loc, files: File[]) {
   }
   useTabs.getState().refreshWhere((t) => t.fs === dest.fs && t.path === dest.path);
   if (!failed) toast({ tone: "success", title: `Copied ${plural(files.length, "item")}` });
+}
+
+/** Copies / moves the selection of `tab` into the folder shown by the other pane. */
+export async function sendToOtherPane(tab: Tab, kind: "copy" | "move") {
+  const other = otherPane(tab.id);
+  const dest = other ? useTabs.getState().tabs.find((t) => t.id === other) : undefined;
+  const items = selectedEntries(tab);
+  if (!dest || !items.length) return;
+  if (dest.search) {
+    toast({ tone: "info", title: "The other pane is showing search results", body: "Open a folder there first." });
+    return;
+  }
+  await transfer(kind, items.map((e) => ({ fs: tab.fs, path: e.path })), { fs: dest.fs, path: dest.path });
 }

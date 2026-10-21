@@ -29,14 +29,29 @@ import { useSizes } from "../store/sizes";
 import { useTabs, type Tab } from "../store/tabs";
 import { toast, useUi } from "../store/ui";
 
-function Btn({ label, onClick, disabled, active, children }: { label: string; onClick: (e: React.MouseEvent) => void; disabled?: boolean; active?: boolean; children: React.ReactNode }) {
+function Btn({
+  label,
+  onClick,
+  disabled,
+  active,
+  className = "",
+  children,
+}: {
+  label: string;
+  onClick: (e: React.MouseEvent) => void;
+  disabled?: boolean;
+  active?: boolean;
+  /** Extra classes, e.g. container-query rules that hide secondary buttons in narrow panes. */
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       title={label}
       aria-label={label}
-      className={`flex size-[30px] shrink-0 items-center justify-center rounded-[8px] transition-colors disabled:opacity-30 ${active ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`}
+      className={`flex size-[30px] shrink-0 items-center justify-center rounded-[8px] transition-colors disabled:opacity-30 ${active ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"} ${className}`}
     >
       {children}
     </button>
@@ -69,7 +84,7 @@ function Crumb({ tab, name, path, last }: { tab: Tab; name: string; path: string
   );
 }
 
-function PathBar({ tab }: { tab: Tab }) {
+function PathBar({ tab, focused }: { tab: Tab; focused: boolean }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(tab.path);
   const input = useRef<HTMLInputElement>(null);
@@ -81,11 +96,20 @@ function PathBar({ tab }: { tab: Tab }) {
   useEffect(() => {
     scroller.current?.scrollTo({ left: scroller.current.scrollWidth, behavior: "smooth" });
   }, [tab.listing?.crumbs.length, tab.path]);
+  // Keep the deepest crumb in view when the pane is resized (splits, dragging gutters).
   useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => el.scrollTo({ left: el.scrollWidth }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [editing]);
+  useEffect(() => {
+    if (!focused) return;
     const onKey = () => setEditing(true);
     window.addEventListener("5files:edit-path", onKey);
     return () => window.removeEventListener("5files:edit-path", onKey);
-  }, []);
+  }, [focused]);
 
   const crumbs = tab.listing?.crumbs ?? [];
   const submit = async () => {
@@ -143,16 +167,17 @@ function PathBar({ tab }: { tab: Tab }) {
 
 let searchRuns = 0;
 
-function SearchBox({ tab }: { tab: Tab }) {
+function SearchBox({ tab, focused }: { tab: Tab; focused: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(tab.filter || tab.search?.query || "");
   const showHidden = useSettings((s) => s.showHidden);
   useEffect(() => setValue(tab.search?.query ?? tab.filter), [tab.id, tab.nav]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (!focused) return;
     const focus = () => input.current?.focus();
     window.addEventListener("5files:focus-search", focus);
     return () => window.removeEventListener("5files:focus-search", focus);
-  }, []);
+  }, [focused]);
 
   const stopSearch = () => {
     const t = useTabs.getState().tabs.find((x) => x.id === tab.id);
@@ -192,7 +217,7 @@ function SearchBox({ tab }: { tab: Tab }) {
   };
 
   return (
-    <div className="flex h-[32px] w-[min(280px,28vw)] shrink-0 items-center gap-2 rounded-[9px] border border-line bg-surface-2/70 px-2.5 transition-[border-color,background-color] focus-within:border-accent focus-within:bg-surface">
+    <div className="flex h-[32px] w-[clamp(110px,26cqw,280px)] shrink-0 items-center gap-2 rounded-[9px] border border-line bg-surface-2/70 px-2.5 transition-[border-color,background-color] focus-within:border-accent focus-within:bg-surface">
       {tab.search?.running ? <Loader2 size={14} className="shrink-0 animate-spin text-accent" /> : <Search size={14} className="shrink-0 text-ink-3" />}
       <input
         ref={input}
@@ -234,7 +259,7 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "kind", label: "Kind" },
 ];
 
-export function Toolbar({ tab }: { tab: Tab }) {
+export function Toolbar({ tab, focused = true }: { tab: Tab; focused?: boolean }) {
   const tabs = useTabs.getState();
   const s = useSettings();
   const isFav = s.favorites.some((f) => f.fs === tab.fs && f.path === tab.path);
@@ -256,7 +281,7 @@ export function Toolbar({ tab }: { tab: Tab }) {
   };
 
   return (
-    <div className="flex h-[48px] shrink-0 items-center gap-1.5 border-b border-line px-2.5">
+    <header className="flex h-[48px] shrink-0 items-center gap-1.5 overflow-hidden border-b border-line px-2.5">
       <div className="flex items-center">
         <Btn label={`Back (${kbd("Mod+[")})`} disabled={tab.index === 0} onClick={() => tabs.back(tab.id)}>
           <ArrowLeft size={16} />
@@ -268,16 +293,18 @@ export function Toolbar({ tab }: { tab: Tab }) {
           <ArrowUp size={16} />
         </Btn>
       </div>
-      <PathBar tab={tab} />
+      <PathBar tab={tab} focused={focused} />
       <Btn
         label={isFav ? "Remove from Favorites" : "Add to Favorites"}
         active={isFav}
+        className="@max-[560px]:hidden"
         onClick={() => s.toggleFavorite({ fs: tab.fs, path: tab.path, name: crumbs[crumbs.length - 1]?.name || tab.path })}
       >
         <Star size={15} className={isFav ? "fill-accent text-accent" : ""} />
       </Btn>
       <Btn
         label="Refresh"
+        className="@max-[560px]:hidden"
         onClick={() => {
           useSizes.getState().bump();
           void tabs.refresh(tab.id);
@@ -285,15 +312,15 @@ export function Toolbar({ tab }: { tab: Tab }) {
       >
         <RefreshCw size={14} />
       </Btn>
-      <span className="mx-0.5 h-5 w-px bg-line" />
-      <Btn label={`New folder (${kbd("Mod+Shift+N")})`} onClick={() => newFolder()}>
+      <span className="mx-0.5 h-5 w-px bg-line @max-[640px]:hidden" />
+      <Btn className="@max-[640px]:hidden" label={`New folder (${kbd("Mod+Shift+N")})`} onClick={() => newFolder()}>
         <FolderPlus size={16} />
       </Btn>
-      <Btn label="New file" onClick={() => newFile()}>
+      <Btn className="@max-[760px]:hidden" label="New file" onClick={() => newFile()}>
         <FilePlus size={15} />
       </Btn>
-      <span className="mx-0.5 h-5 w-px bg-line" />
-      <div className="relative flex rounded-[9px] bg-surface-2 p-[2px]">
+      <span className="mx-0.5 h-5 w-px bg-line @max-[760px]:hidden" />
+      <div className="relative flex rounded-[9px] bg-surface-2 p-[2px] @max-[480px]:hidden">
         {(["list", "grid"] as const).map((v) => (
           <button
             key={v}
@@ -307,16 +334,16 @@ export function Toolbar({ tab }: { tab: Tab }) {
           </button>
         ))}
       </div>
-      <Btn label="Sort" onClick={sortMenu}>
+      <Btn className="@max-[760px]:hidden" label="Sort" onClick={sortMenu}>
         <ArrowDownWideNarrow size={15} />
       </Btn>
-      <Btn label={s.showHidden ? `Hide hidden files (${kbd("Mod+Shift+.")})` : `Show hidden files (${kbd("Mod+Shift+.")})`} active={s.showHidden} onClick={() => s.set({ showHidden: !s.showHidden })}>
+      <Btn className="@max-[760px]:hidden" label={s.showHidden ? `Hide hidden files (${kbd("Mod+Shift+.")})` : `Show hidden files (${kbd("Mod+Shift+.")})`} active={s.showHidden} onClick={() => s.set({ showHidden: !s.showHidden })}>
         {s.showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
       </Btn>
-      <Btn label={`Preview pane (${kbd("Mod+Alt+P")})`} active={s.previewPane} onClick={() => s.set({ previewPane: !s.previewPane })}>
+      <Btn className="@max-[760px]:hidden" label={`Preview pane (${kbd("Mod+Alt+P")})`} active={s.previewPane} onClick={() => s.set({ previewPane: !s.previewPane })}>
         <PanelRight size={15} />
       </Btn>
-      <SearchBox tab={tab} />
-    </div>
+      <SearchBox tab={tab} focused={focused} />
+    </header>
   );
 }

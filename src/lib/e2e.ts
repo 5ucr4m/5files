@@ -3,7 +3,8 @@
 // PASS/FAIL to the app log, covering native events, the watcher and metrics.
 import { invoke } from "@tauri-apps/api/core";
 import { api } from "./api";
-import { newFolder, transfer } from "./ops";
+import { newFolder, sendToOtherPane, transfer } from "./ops";
+import { useLayout } from "../store/layout";
 import { useMetrics, useTransfers } from "../store/live";
 import { folderSize, useSizes } from "../store/sizes";
 import { measureFolders } from "./sizes";
@@ -80,6 +81,21 @@ export async function runE2E(dir: string, home?: string) {
         return s?.done ? s : null;
       });
       if (size.bytes !== 96 * 1024 * 1024 || size.files !== 1) throw new Error(`measured ${size.bytes} bytes / ${size.files} files`);
+    });
+    await step("split panes: open, copy to the other pane, close", async () => {
+      const L = useLayout.getState();
+      L.split("row");
+      await until("two panes", () => document.querySelectorAll("[data-pane-id]").length === 2);
+      const right = activeTab()!;
+      await tabs.navigate(right.id, { fs: "local", path: `${dir}${sep}untitled folder` });
+      L.next(1); // back to the first pane (the test folder)
+      const left = activeTab()!;
+      await until("left listing", () => left.listing?.path === dir);
+      useTabs.getState().select(left.id, [`${dir}${sep}pic.png`]);
+      await sendToOtherPane(useTabs.getState().tabs.find((t) => t.id === left.id)!, "copy");
+      await until("copied into the other pane", () => useTabs.getState().tabs.find((t) => t.id === right.id)?.listing?.entries.some((e) => e.name === "pic.png"), 10000);
+      useTabs.getState().closeTab(right.id);
+      await until("back to one pane", () => document.querySelectorAll("[data-pane-id]").length === 1 && !useTabs.getState().tabs.some((t) => t.id === right.id), 5000);
     });
     if (home) {
       await step(`measures a real folder (${home})`, async () => {

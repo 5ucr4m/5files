@@ -2,7 +2,8 @@ import { CornerDownLeft, Search } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { copySelection, deleteSelection, newFile, newFolder, openConnection, paste } from "../lib/ops";
-import { kbd } from "../lib/platform";
+import { isMac, kbd } from "../lib/platform";
+import { useLayout } from "../store/layout";
 import { useDrives } from "../store/live";
 import { useSettings } from "../store/settings";
 import { activeTab, useTabs } from "../store/tabs";
@@ -18,6 +19,7 @@ interface Command {
 
 function commands(): Command[] {
   const tabs = useTabs.getState();
+  const L = useLayout.getState();
   const s = useSettings.getState();
   const ui = useUi.getState();
   const t = activeTab();
@@ -28,6 +30,11 @@ function commands(): Command[] {
     { id: "close-tab", group: "Tabs", title: "Close tab", hint: kbd("Mod+W"), run: () => t && tabs.closeTab(t.id) },
     { id: "dup-tab", group: "Tabs", title: "Duplicate tab", run: () => t && tabs.newTab({ fs: t.fs, path: t.path }, { afterId: t.id }) },
     { id: "close-others", group: "Tabs", title: "Close other tabs", run: () => t && tabs.closeOthers(t.id) },
+    { id: "split-right", group: "Panes", title: "Split right", hint: kbd("Mod+\\"), run: () => L.split("row") },
+    { id: "split-down", group: "Panes", title: "Split down", hint: kbd("Mod+Shift+\\"), run: () => L.split("col") },
+    { id: "pane-next", group: "Panes", title: "Focus next pane", hint: isMac() ? "⌃B o" : "Ctrl+B o", run: () => L.next(1) },
+    { id: "pane-zoom", group: "Panes", title: "Zoom pane (toggle)", hint: kbd("Mod+Shift+Enter"), run: () => L.toggleZoom() },
+    { id: "pane-close", group: "Panes", title: "Close pane", hint: kbd("Mod+W"), run: () => t && tabs.closeTab(t.id) },
     { id: "new-folder", group: "Files", title: "New folder", hint: kbd("Mod+Shift+N"), run: () => newFolder() },
     { id: "new-file", group: "Files", title: "New file", run: () => newFile() },
     { id: "copy", group: "Files", title: "Copy selection", hint: kbd("Mod+C"), run: () => copySelection(false) },

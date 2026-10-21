@@ -5,7 +5,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { canDrop, droppedFiles, dropEffect, endDrag, handleDrop, isExternalFileDrag, isInternalDrag, startDrag } from "../lib/dnd";
 import { formatBytes, formatDate, kindLabel, sortEntries, stemRange, type SortKey } from "../lib/format";
 import { backgroundMenu, itemMenu } from "../lib/menus";
-import { commitRename, copySelection, deleteSelection, newFolder, openEntry, paste, selectedEntries, transfer, uploadDropped } from "../lib/ops";
+import { commitRename, copySelection, deleteSelection, newFolder, openEntry, paste, selectedEntries, sendToOtherPane, transfer, uploadDropped } from "../lib/ops";
+import { otherPane } from "../store/layout";
 import { isMac, isMod } from "../lib/platform";
 import { clickSelect, hitGrid, hitList, jumpTo, moveFocus, normRect, typeAhead } from "../lib/selection";
 import type { Entry } from "../lib/types";
@@ -298,7 +299,9 @@ function EmptyState({ tab }: { tab: Tab }) {
   );
 }
 
-export function FileView({ tab }: { tab: Tab }) {
+export function FileView({ tab, focused = true }: { tab: Tab; focused?: boolean }) {
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
   const showHidden = useSettings((s) => s.showHidden);
   const foldersFirst = useSettings((s) => s.foldersFirst);
   const density = useSettings((s) => s.density);
@@ -488,6 +491,8 @@ export function FileView({ tab }: { tab: Tab }) {
     }
     if (k === "Enter" && focusEntry) return handled(), void openEntry(t, focusEntry, { newTab: mod });
     if (k === "F2" && focusEntry) return handled(), useTabs.getState().patch(t.id, { renaming: focusEntry.path });
+    // Commander-style: F5 copies / F6 moves the selection to the other pane.
+    if ((k === "F5" || k === "F6") && sel.length && otherPane(t.id)) return handled(), void sendToOtherPane(t, k === "F5" ? "copy" : "move");
     if (k === " " && focusEntry && Date.now() - typed.current.at > 700) return handled(), useUi.getState().set({ quickLook: { fs: t.fs, entry: focusEntry } });
     if ((k === "Delete" || (k === "Backspace" && mod)) && sel.length) return handled(), void deleteSelection(e.shiftKey || e.altKey);
     if (k === "Backspace" && !mod && !isMac()) return handled(), useTabs.getState().back(t.id);
@@ -520,7 +525,7 @@ export function FileView({ tab }: { tab: Tab }) {
   keyRef.current = onKeyDown;
   useEffect(() => {
     const onWinKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || !focusedRef.current) return;
       const target = e.target as HTMLElement;
       if (scrollRef.current?.contains(target)) return; // React handler already ran
       if (target.closest("input, textarea, select, [contenteditable], [role=dialog], [role=menu]")) return;
@@ -535,6 +540,7 @@ export function FileView({ tab }: { tab: Tab }) {
   }, []);
   useEffect(() => {
     const focus = () => {
+      if (!focusedRef.current) return;
       scrollRef.current?.focus({ preventScroll: true });
       const t = useTabs.getState().tabs.find((x) => x.id === tab.id);
       if (t && !t.selection.size && order[0]) setSel({ selection: new Set([order[0]]), anchor: order[0], focus: order[0] });
@@ -542,10 +548,12 @@ export function FileView({ tab }: { tab: Tab }) {
     window.addEventListener("5files:focus-list", focus);
     return () => window.removeEventListener("5files:focus-list", focus);
   }, [order, tab.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Focus the list when a tab is shown so arrow keys work immediately.
+  // Focus the list when its pane becomes the focused one, so arrow keys work immediately.
   useEffect(() => {
-    if (!document.activeElement || document.activeElement === document.body) scrollRef.current?.focus({ preventScroll: true });
-  }, [tab.id]);
+    if (!focused) return;
+    const a = document.activeElement as HTMLElement | null;
+    if (!a || a === document.body || !a.closest("input, textarea, select, [role=dialog]")) scrollRef.current?.focus({ preventScroll: true });
+  }, [tab.id, focused]);
 
   // ---------------- drop onto the folder background ----------------
   const [over, setOver] = useState(false);
