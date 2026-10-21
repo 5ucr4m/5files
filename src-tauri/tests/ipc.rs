@@ -243,3 +243,26 @@ fn os_drop_uploads_stream_raw_chunks() {
     assert!(!dir.path().join("half.bin").exists());
     assert_eq!(h.call("upload_begin", json!({ "fs": "local", "dir": s(dir.path()), "name": "../x" })).unwrap_err()["kind"], "invalid");
 }
+
+#[test]
+fn share_a_folder_over_ipc() {
+    let h = harness();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "hi").unwrap();
+    let opts = json!({ "allowUpload": false, "showHidden": false, "expiresInMins": null });
+    let v = h.ok("share_start", json!({ "fs": "local", "path": s(dir.path()), "options": opts }));
+    let id = v["id"].as_str().unwrap().to_string();
+    assert!(v["url"].as_str().unwrap().ends_with(&format!("/s/{id}/")));
+    assert_eq!(v["qr"]["bits"].as_str().unwrap().len(), (v["qr"]["size"].as_u64().unwrap().pow(2)) as usize);
+    assert_eq!(v["name"], dir.path().file_name().unwrap().to_string_lossy().as_ref());
+    // Sharing again returns the same link.
+    assert_eq!(h.ok("share_start", json!({ "fs": "local", "path": s(dir.path()), "options": opts }))["id"], id);
+    // Files can't be shared, only folders.
+    assert!(h.call("share_start", json!({ "fs": "local", "path": s(&dir.path().join("a.txt")), "options": opts })).is_err());
+    let up = h.ok("share_update", json!({ "id": id, "options": { "allowUpload": true, "showHidden": false, "expiresInMins": 60 } }));
+    assert_eq!(up["options"]["allowUpload"], true);
+    assert!(up["expiresAt"].as_i64().unwrap() > 0);
+    assert_eq!(h.ok("share_list", json!({})).as_array().unwrap().len(), 1);
+    h.ok("share_stop", json!({ "id": id }));
+    assert_eq!(h.ok("share_list", json!({})).as_array().unwrap().len(), 0);
+}

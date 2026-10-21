@@ -6,6 +6,7 @@ import { ConfirmDialog, ConflictDialog, ContextMenu, Modal, Toasts } from "./com
 import { PreviewPane, QuickLook } from "./components/Preview";
 import { SettingsPanel } from "./components/Settings";
 import { ShortcutsSheet } from "./components/Shortcuts";
+import { SharePanel } from "./components/Share";
 import { SyncPanel } from "./components/Sync";
 import { Sidebar } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
@@ -15,7 +16,7 @@ import { useLayout } from "./store/layout";
 import { api } from "./lib/api";
 import { ejectVolume, fsName, onVolume, plural, transfer } from "./lib/ops";
 import { isMac, isMod } from "./lib/platform";
-import { useDrives, useMetrics, useSyncs, useTransfers } from "./store/live";
+import { useDrives, useMetrics, useShares, useSyncs, useTransfers } from "./store/live";
 import { ACCENTS, resolvedTheme, useSettings } from "./store/settings";
 import { activeTab, useActiveTab, useTabs } from "./store/tabs";
 import { toast, useUi } from "./store/ui";
@@ -52,7 +53,10 @@ function useBackendEvents() {
       a.onTransfers((jobs) => useTransfers.getState().set(jobs)),
       a.onMetrics((m) => useMetrics.getState().push(m)),
       a.onSyncs((list) => useSyncs.getState().set(list)),
-      a.onTrayOpen((what) => useUi.getState().set(what === "syncs" ? { panel: "sync", syncView: null } : { panel: "transfers" })),
+      a.onShares((list) => useShares.getState().set(list)),
+      a.onTrayOpen((what) =>
+        useUi.getState().set(what === "syncs" ? { panel: "sync", syncView: null } : what === "shares" ? { panel: "share", shareView: null } : { panel: "transfers" }),
+      ),
       a.onFsChanged((dirs) => {
         const set = new Set(dirs);
         useTabs.getState().refreshWhere((t) => t.fs === "local" && !t.search && set.has(t.path));
@@ -80,6 +84,7 @@ function useBackendEvents() {
     ];
     void a.transfers().then((j) => useTransfers.getState().set(j));
     void a.syncList().then((list) => useSyncs.getState().set(list));
+    void a.shareList().then((list) => useShares.getState().set(list));
     return () => subs.forEach((p) => p.then((u) => u()));
   }, []);
 
@@ -315,6 +320,9 @@ export default function App() {
         </Modal>
         <Modal open={panel === "sync"} onClose={() => useUi.getState().set({ panel: null, syncView: null })} width={720}>
           <SyncPanel />
+        </Modal>
+        <Modal open={panel === "share"} onClose={() => useUi.getState().set({ panel: null, shareView: null })} width={640}>
+          <SharePanel />
         </Modal>
         <Modal open={panel === "shortcuts"} onClose={closePanel} width={820}>
           <ShortcutsSheet />

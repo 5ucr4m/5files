@@ -20,12 +20,15 @@ import {
   ArrowRightLeft,
   Columns2,
   Rows2,
+  Radio,
 } from "lucide-react";
 import { api } from "./api";
 import { copySelection, deleteSelection, newFile, newFolder, openEntry, paste, selectedEntries, sendToOtherPane, transfer } from "./ops";
 import { otherPane, useLayout } from "../store/layout";
 import { isMac, kbd } from "./platform";
 import { measureFolders } from "./sizes";
+import { shareFolder } from "../components/Share";
+import { useShares } from "../store/live";
 import type { Entry } from "./types";
 import { useSettings } from "../store/settings";
 import { useTabs, type Tab } from "../store/tabs";
@@ -41,6 +44,16 @@ async function copyText(text: string, what: string) {
   } catch {
     toast({ tone: "error", title: "Clipboard unavailable" });
   }
+}
+
+/** "Share on network…", or a way back to the link when the folder already is. */
+function shareItem(fs: Tab["fs"], path: string, thisFolder = false): MenuItem {
+  const shared = useShares.getState().shares.some((s) => s.fs === fs && s.path === path);
+  return {
+    label: shared ? "Shared on network — show link" : thisFolder ? "Share this folder on network…" : "Share on network…",
+    icon: Radio,
+    run: () => void shareFolder(fs, path),
+  };
 }
 
 export function itemMenu(tab: Tab, entry: Entry): MenuItem[] {
@@ -78,6 +91,7 @@ export function itemMenu(tab: Tab, entry: Entry): MenuItem[] {
     const fav = useSettings.getState().favorites.some((f) => f.fs === tab.fs && f.path === entry.path);
     items.push({ label: fav ? "Remove from Favorites" : "Add to Favorites", icon: Star, run: () => useSettings.getState().toggleFavorite({ fs: tab.fs, path: entry.path, name: entry.name }) });
   }
+  if (entry.isDir && !many) items.push(shareItem(tab.fs, entry.path));
   items.push({ label: many ? "Copy paths" : "Copy path", icon: Link2, shortcut: kbd("Mod+Alt+C"), run: () => copyText(sel.map((e) => e.path).join("\n"), many ? "paths" : "path") });
   if (local && !many) items.push({ label: revealLabel(), icon: ExternalLink, run: () => api().reveal(entry.path) });
   const dirs = sel.filter((e) => e.isDir);
@@ -116,6 +130,7 @@ export function backgroundMenu(tab: Tab): MenuItem[] {
     { label: "Split right", icon: Columns2, shortcut: kbd("Mod+\\"), run: () => useLayout.getState().split("row") },
     { label: "Split down", icon: Rows2, shortcut: kbd("Mod+Shift+\\"), run: () => useLayout.getState().split("col") },
     { divider: true },
+    shareItem(tab.fs, tab.path, true),
     { label: "Copy folder path", icon: Link2, run: () => copyText(tab.path, "path") },
     ...(tab.fs === "local" ? [{ label: revealLabel(), icon: ExternalLink, run: () => api().reveal(tab.path) }] : []),
   ];

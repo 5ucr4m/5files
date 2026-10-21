@@ -4,6 +4,7 @@ pub mod error;
 pub mod metrics;
 pub mod oauth;
 pub mod search;
+pub mod share;
 pub mod sizes;
 pub mod sync;
 pub mod thumbs;
@@ -119,6 +120,10 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::sync_pause,
             commands::eject_volume,
             commands::set_background_mode,
+            commands::share_list,
+            commands::share_start,
+            commands::share_update,
+            commands::share_stop,
         ])
 }
 
@@ -180,6 +185,15 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
     syncs.start();
     let (syncs_for_tray, transfers_for_tray) = (syncs.clone(), transfers.clone());
 
+    // Folders shared on the local network: pushed to the UI like syncs.
+    let share_dirty = Arc::new(AtomicBool::new(true));
+    let shares = {
+        let d = share_dirty.clone();
+        let thumbs = handle.path().app_cache_dir().unwrap_or_else(|_| std::env::temp_dir().join("5files")).join("thumbs");
+        share::Shares::new(thumbs, Arc::new(move || d.store(true, Ordering::Relaxed)))
+    };
+    let shares_for_tray = shares.clone();
+
     let watcher = {
         let handle = handle.clone();
         let sizes = sizes.clone();
@@ -201,6 +215,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
         sizes,
         temp_dir,
         uploads: Default::default(),
+        shares: shares.clone(),
     });
 
     // Transfer updates: coalesce many progress ticks into ~8 UI updates/second.
@@ -215,6 +230,10 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
                 }
                 if sync_dirty.swap(false, Ordering::Relaxed) {
                     let _ = handle.emit("syncs", syncs.views());
+                }
+                shares.expire().await;
+                if share_dirty.swap(false, Ordering::Relaxed) {
+                    let _ = handle.emit("shares", shares.views());
                 }
             }
         });
@@ -238,7 +257,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
     let tray_icon = if std::env::var_os("FIVEFILES_NO_TRAY").is_some() {
         None
     } else {
-        match tray::Tray::build(&handle, syncs_for_tray.clone()) {
+        match tray::Tray::build(&handle, syncs_for_tray.clone(), shares_for_tray.clone()) {
             Ok(t) => Some(t),
             Err(e) => {
                 eprintln!("[5files] no system tray: {e}");
@@ -257,7 +276,7 @@ pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::erro
                 iv.tick().await;
                 let _ = handle.emit("metrics", sampler.sample());
                 if let Some(t) = &tray_icon {
-                    t.update(&transfers.snapshots(), &syncs_for_tray.views());
+                    t.update(&transfers.snapshots(), &syncs_for_tray.views(), &shares_for_tray.brief());
                 }
             }
         });

@@ -12,6 +12,8 @@ import type {
   Place,
   Platform,
   SearchEvent,
+  ShareOptions,
+  ShareView,
   SizeEvent,
   SyncInput,
   SyncPair,
@@ -73,6 +75,14 @@ export interface Backend {
   syncRun(id: string, allowDeletes: boolean): Promise<void>;
   syncPause(id: string, paused: boolean): Promise<void>;
   onSyncs(cb: (syncs: SyncPair[]) => void): Promise<Unlisten>;
+  shareList(): Promise<ShareView[]>;
+  /** Shares a folder on the local network (returns the existing share if it already is). */
+  shareStart(fs: FsId, path: string, options: ShareOptions): Promise<ShareView>;
+  shareUpdate(id: string, options: ShareOptions): Promise<ShareView>;
+  shareStop(id: string): Promise<void>;
+  onShares(cb: (shares: ShareView[]) => void): Promise<Unlisten>;
+  /** Opens a web link in the default browser. */
+  openUrl(url: string): Promise<void>;
   /** URL the <img>/<video> tags can load for a local file. */
   fileUrl(path: string): string;
   thumbUrl(path: string, size: number): string;
@@ -168,6 +178,15 @@ async function tauriBackend(): Promise<Backend> {
     syncRun: (id, allowDeletes) => invoke("sync_run", { id, allowDeletes }),
     syncPause: (id, paused) => invoke("sync_pause", { id, paused }),
     onSyncs: (cb) => listen<SyncPair[]>("syncs", (e) => cb(e.payload)),
+    shareList: () => invoke("share_list"),
+    shareStart: (fs, path, options) => invoke("share_start", { fs, path, options }),
+    shareUpdate: (id, options) => invoke("share_update", { id, options }),
+    shareStop: (id) => invoke("share_stop", { id }),
+    onShares: (cb) => listen<ShareView[]>("shares", (e) => cb(e.payload)),
+    async openUrl(url) {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    },
     fileUrl: (path) => convertFileSrc(path),
     thumbUrl: (path, size) => `${convertFileSrc(path, "thumb")}?s=${size}`,
     onTransfers: (cb) => listen<Job[]>("transfers", (e) => cb(e.payload)),

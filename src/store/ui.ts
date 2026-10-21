@@ -33,7 +33,7 @@ export interface ConflictRequest {
   resolve: (c: Conflict | null) => void;
 }
 
-export type Panel = null | "transfers" | "connections" | "settings" | "sync" | "shortcuts";
+export type Panel = null | "transfers" | "connections" | "settings" | "sync" | "shortcuts" | "share";
 
 interface UiState {
   toasts: Toast[];
@@ -46,6 +46,8 @@ interface UiState {
   editing: { id?: string; kind?: ConnKind } | null;
   /** Sync panel: a pair's id, "new", or null for the list. */
   syncView: string | null;
+  /** Share panel: a share's id, or null for the list. */
+  shareView: string | null;
   quickLook: { fs: FsId; entry: Entry } | null;
   clipboard: { mode: "copy" | "cut"; items: Loc[] } | null;
   dropTarget: string | null;
@@ -67,6 +69,7 @@ export const useUi = create<UiState>((set, get) => ({
   panel: null,
   editing: null,
   syncView: null,
+  shareView: null,
   quickLook: null,
   clipboard: null,
   dropTarget: null,

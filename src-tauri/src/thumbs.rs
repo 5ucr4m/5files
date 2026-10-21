@@ -92,6 +92,12 @@ pub fn render(path: &Path, size: u32, cache_dir: &Path) -> Result<(Vec<u8>, &'st
     Ok((bytes, mime))
 }
 
+/// `render` on the blocking pool, limited to a few decodes at a time.
+pub async fn render_async(path: PathBuf, size: u32, cache_dir: PathBuf) -> Result<(Vec<u8>, &'static str), String> {
+    let _permit = decode_slots().acquire().await;
+    tokio::task::spawn_blocking(move || render(&path, size, &cache_dir)).await.map_err(|e| e.to_string())?
+}
+
 pub async fn respond(uri: String, cache_dir: PathBuf) -> Response<Vec<u8>> {
     let Some((path, size)) = parse_request(&uri) else {
         return status(StatusCode::BAD_REQUEST);

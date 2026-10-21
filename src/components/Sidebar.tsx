@@ -9,6 +9,7 @@ import {
   Monitor,
   Music2,
   Plus,
+  Radio,
   Server,
   Star,
   Usb,
@@ -23,7 +24,8 @@ import { formatBytes } from "../lib/format";
 import { ejectVolume, openConnection } from "../lib/ops";
 import { isMac, kbd } from "../lib/platform";
 import type { Connection, Loc, Place } from "../lib/types";
-import { useDrives, useSyncs } from "../store/live";
+import { useDrives, useShares, useSyncs } from "../store/live";
+import { copyShareLink, stopShare } from "./Share";
 import { SyncGlyph, syncStatus } from "./Sync";
 import { useSettings } from "../store/settings";
 import { useActiveTab, useTabs } from "../store/tabs";
@@ -161,6 +163,15 @@ function Usage({ total, free }: { total: number; free: number }) {
   );
 }
 
+/** Broadcast glyph; its waves pulse while something is being sent. */
+function ShareGlyph({ busy }: { busy: boolean }) {
+  return (
+    <span className="relative flex items-center justify-center text-success">
+      <Radio size={15} className={busy ? "animate-pulse" : ""} />
+    </span>
+  );
+}
+
 function StatusDot({ c }: { c: Connection }) {
   const color = c.status === "connected" ? "var(--success)" : c.status === "error" ? "var(--danger)" : c.status === "connecting" ? "var(--warning)" : "transparent";
   return (
@@ -176,6 +187,7 @@ export function Sidebar() {
   const tab = useActiveTab();
   const { volumes, places, connections, roots } = useDrives();
   const syncs = useSyncs((s) => s.syncs);
+  const shares = useShares((s) => s.shares);
   const ejecting = useDrives((s) => s.ejecting);
   const favorites = useSettings((s) => s.favorites);
   const width = useSettings((s) => s.sidebarWidth);
@@ -375,6 +387,35 @@ export function Sidebar() {
           </button>
         )}
       </Section>
+
+      {shares.length > 0 && (
+        <Section title="Shared">
+          {shares.map((s) => (
+            <Item
+              key={s.id}
+              icon={<ShareGlyph busy={s.active > 0} />}
+              label={s.name}
+              title={`${s.url}\nOpen this link on another device on the same network`}
+              onClick={() => useUi.getState().set({ panel: "share", shareView: s.id })}
+              below={
+                <span className="block truncate text-[10.5px] text-ink-4">
+                  {s.active > 0 ? "Sending…" : s.visitors ? `${s.visitors} ${s.visitors === 1 ? "device" : "devices"} · ${formatBytes(s.bytesOut)} sent` : "Waiting for visitors"}
+                </span>
+              }
+              onContextMenu={(e) => {
+                e.preventDefault();
+                useUi.getState().openMenu(e.clientX, e.clientY, [
+                  { label: "Copy link", run: () => void copyShareLink(s) },
+                  { label: "Open in browser", run: () => void api().openUrl(s.url) },
+                  { label: "Show link & QR code…", run: () => useUi.getState().set({ panel: "share", shareView: s.id }) },
+                  { divider: true },
+                  { label: "Stop sharing", danger: true, run: () => void stopShare(s) },
+                ]);
+              }}
+            />
+          ))}
+        </Section>
+      )}
     </aside>
   );
 }

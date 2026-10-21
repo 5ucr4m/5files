@@ -229,3 +229,43 @@ export interface SyncPreview {
   needsReview: boolean;
   sample: SyncOp[];
 }
+
+// ---------------------------------------------------------------- sharing on the network
+
+export interface ShareOptions {
+  /** Visitors may add files (never delete or replace). */
+  allowUpload: boolean;
+  showHidden: boolean;
+  /** Stop sharing after this many minutes; null = until stopped. */
+  expiresInMins: number | null;
+}
+
+export interface ShareActivity {
+  at: number;
+  /** Visitor's address on the network. */
+  who: string;
+  action: "opened" | "downloaded" | "zip" | "uploaded";
+  name: string;
+}
+
+export interface ShareView {
+  id: string;
+  name: string;
+  fs: FsId;
+  path: string;
+  url: string;
+  altUrls: string[];
+  /** False when this computer has no network: only it can open the link. */
+  online: boolean;
+  qr: { size: number; bits: string };
+  options: ShareOptions;
+  expiresAt: number | null;
+  created: number;
+  visitors: number;
+  lastSeen: number | null;
+  bytesOut: number;
+  bytesIn: number;
+  /** Downloads / uploads running right now. */
+  active: number;
+  activity: ShareActivity[];
+}

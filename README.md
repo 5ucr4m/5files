@@ -45,6 +45,17 @@ queue with real progress, and a live monitor in the title bar shows how much dis
 - A run that would delete a large share of the files (e.g. an unplugged source) is held for review
 - Local folders are watched (syncs ~2 s after changes); remote ones are re-checked every 5 minutes
 
+**Share on the network** (right-click a folder → Share on network…)
+- Any folder, on any drive, opens in a browser on another computer or phone on the same Wi-Fi —
+  nothing to install there. The panel shows the link, a QR code to scan, and live activity
+- Visitors browse subfolders, preview photos, video (with seeking), audio, PDFs and text, download
+  files, or download a whole folder as a ZIP (streamed, with a real progress bar)
+- Optional: let visitors add files (drag & drop or a picker; never delete or replace),
+  include hidden files, stop automatically after 1 hour or 1 day
+- Only people with the link get in (unguessable token); nothing outside the folder is reachable,
+  links leading out of it included; files never run as web pages. Sharing stops when you stop it,
+  it expires, or 5files quits; the menu bar shows what's shared and can stop it
+
 **Working with files**
 - Copy / cut / paste across tabs **and across drives** (local ⇄ S3 ⇄ SFTP …), duplicate, rename inline (F2)
 - Drag & drop between views, tabs, breadcrumbs and the sidebar (`⌥`/`Ctrl` forces copy), drop files in from the OS
@@ -116,6 +127,7 @@ src-tauri/src
 ├── search.rs       streaming recursive search
 ├── sizes.rs        folder sizes: parallel walk, streaming, cache + invalidation
 ├── sync/           folder sync: plan.rs (pure rules, heavily tested) + engine (scan, run, watch)
+├── share/          sharing on the network: hyper server, streaming ZIP, the browser page (page.html)
 ├── oauth.rs        Google OAuth (loopback + PKCE)
 └── commands.rs     the IPC surface
 
@@ -160,4 +172,8 @@ CI (`.github/workflows/ci.yml`) runs the test suites on macOS, Windows and Ubunt
 integration suite on Ubuntu, and builds installers for all three platforms on `main`.
 
 Environment overrides: `FIVEFILES_CONFIG_DIR` (config location, e.g. portable installs),
-`FIVEFILES_NO_KEYCHAIN=1` (store secrets in the fallback file).
+`FIVEFILES_NO_KEYCHAIN=1` (store secrets in the fallback file), `FIVEFILES_SHARE_PORT` (port for
+sharing; default 5155, or the next free one).
+
+Working on the share page: `FIVEFILES_SHARE_PAGE=src/share/page.html cargo run --example share_demo -- <folder> --upload`
+serves a folder and re-reads the page on every load.

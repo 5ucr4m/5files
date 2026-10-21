@@ -25,7 +25,9 @@ pub struct Tray<R: Runtime> {
     syncs: MenuItem<R>,
     sync_all: MenuItem<R>,
     pause_all: CheckMenuItem<R>,
-    last: Mutex<(String, String, bool, bool)>,
+    shares: MenuItem<R>,
+    stop_shares: MenuItem<R>,
+    last: Mutex<(String, String, bool, bool, String)>,
 }
 
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
@@ -89,13 +91,24 @@ pub fn syncs_text(views: &[sync::SyncView]) -> (String, bool) {
     }
 }
 
+/// "Sharing “Photos” on the network" — folders a browser elsewhere can open right now.
+pub fn shares_text(views: &[(String, u32)]) -> String {
+    match views {
+        [] => "No folders shared".into(),
+        [(name, _)] => format!("Sharing “{name}” on the network"),
+        many => format!("Sharing {} folders on the network", many.len()),
+    }
+}
+
 impl<R: Runtime> Tray<R> {
-    pub fn build(app: &AppHandle<R>, syncs: Arc<sync::Engine>) -> tauri::Result<Arc<Self>> {
+    pub fn build(app: &AppHandle<R>, syncs: Arc<sync::Engine>, shares: Arc<crate::share::Shares>) -> tauri::Result<Arc<Self>> {
         let open = MenuItem::with_id(app, "open", "Open 5files", true, None::<&str>)?;
         let transfers = MenuItem::with_id(app, "transfers", "No transfers running", true, None::<&str>)?;
         let syncs_item = MenuItem::with_id(app, "syncs", "No folder syncs", true, None::<&str>)?;
         let sync_all = MenuItem::with_id(app, "sync-all", "Sync all now", false, None::<&str>)?;
         let pause_all = CheckMenuItem::with_id(app, "pause-all", "Pause syncs", true, false, None::<&str>)?;
+        let shares_item = MenuItem::with_id(app, "shares", "No folders shared", true, None::<&str>)?;
+        let stop_shares = MenuItem::with_id(app, "stop-shares", "Stop sharing", false, None::<&str>)?;
         let quit = MenuItem::with_id(app, "quit", "Quit 5files", true, None::<&str>)?;
         let menu = Menu::with_items(
             app,
@@ -107,6 +120,9 @@ impl<R: Runtime> Tray<R> {
                 &sync_all,
                 &pause_all,
                 &PredefinedMenuItem::separator(app)?,
+                &shares_item,
+                &stop_shares,
+                &PredefinedMenuItem::separator(app)?,
                 &quit,
             ],
         )?;
@@ -117,11 +133,15 @@ impl<R: Runtime> Tray<R> {
             .menu(&menu)
             .on_menu_event(move |app, event| match event.id.as_ref() {
                 "open" => show_main(app),
-                "transfers" | "syncs" => {
+                "transfers" | "syncs" | "shares" => {
                     show_main(app);
                     let _ = app.emit("tray-open", event.id.as_ref());
                 }
                 "sync-all" => engine.run_all(),
+                "stop-shares" => {
+                    let shares = shares.clone();
+                    tauri::async_runtime::spawn(async move { shares.stop_all().await });
+                }
                 "pause-all" => {
                     let pause = !engine.all_paused();
                     engine.pause_all(pause);
@@ -147,19 +167,33 @@ impl<R: Runtime> Tray<R> {
         let builder = builder.icon(Image::from_bytes(ICON_APP)?).show_menu_on_left_click(false);
 
         let icon = builder.build(app)?;
-        Ok(Arc::new(Self { icon, transfers, syncs: syncs_item, sync_all, pause_all, last: Mutex::new(Default::default()) }))
+        Ok(Arc::new(Self {
+            icon,
+            transfers,
+            syncs: syncs_item,
+            sync_all,
+            pause_all,
+            shares: shares_item,
+            stop_shares,
+            last: Mutex::new(Default::default()),
+        }))
     }
 
     /// Refreshes texts and the activity icon (only touches what changed).
-    pub fn update(&self, jobs: &[transfer::JobSnapshot], views: &[sync::SyncView]) {
+    pub fn update(&self, jobs: &[transfer::JobSnapshot], views: &[sync::SyncView], shares: &[(String, u32)]) {
         let (t_text, t_active) = transfers_text(jobs);
         let (s_text, s_active) = syncs_text(views);
-        let active = t_active || s_active;
+        let sh_text = shares_text(shares);
+        let active = t_active || s_active || shares.iter().any(|s| s.1 > 0);
         let paused = !views.is_empty() && views.iter().all(|v| v.pair.paused);
         let mut last = self.last.lock();
-        let next = (t_text.clone(), s_text.clone(), active, paused);
+        let next = (t_text.clone(), s_text.clone(), active, paused, sh_text.clone());
         if *last == next {
             return;
+        }
+        if last.4 != sh_text {
+            let _ = self.shares.set_text(&sh_text);
+            let _ = self.stop_shares.set_enabled(!shares.is_empty());
         }
         if last.0 != t_text {
             let _ = self.transfers.set_text(&t_text);
@@ -170,7 +204,8 @@ impl<R: Runtime> Tray<R> {
         let _ = self.sync_all.set_enabled(!views.is_empty() && !paused);
         let _ = self.pause_all.set_enabled(!views.is_empty());
         let _ = self.pause_all.set_checked(paused);
-        let _ = self.icon.set_tooltip(Some(format!("5files\n{t_text}\n{s_text}")));
+        let tip = if shares.is_empty() { format!("5files\n{t_text}\n{s_text}") } else { format!("5files\n{t_text}\n{s_text}\n{sh_text}") };
+        let _ = self.icon.set_tooltip(Some(tip));
         #[cfg(target_os = "macos")]
         if last.2 != active {
             if let Ok(img) = Image::from_bytes(if active { ICON_ACTIVE } else { ICON_IDLE }) {

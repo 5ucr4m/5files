@@ -15,7 +15,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   );
 }
 
-function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
+export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <button role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} className={`relative h-[20px] w-[36px] rounded-full transition-colors ${on ? "bg-accent" : "bg-line-strong"}`}>
       <motion.span className="absolute top-[2px] size-[16px] rounded-full bg-white shadow" animate={{ left: on ? 18 : 2 }} transition={{ type: "spring", stiffness: 700, damping: 35 }} />
@@ -23,7 +23,7 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
   );
 }
 
-function Segmented<T extends string>({ value, options, onChange, id }: { value: T; options: { value: T; label: string; icon?: React.ReactNode }[]; onChange: (v: T) => void; id: string }) {
+export function Segmented<T extends string>({ value, options, onChange, id }: { value: T; options: { value: T; label: string; icon?: React.ReactNode }[]; onChange: (v: T) => void; id: string }) {
   return (
     <div className="flex rounded-[9px] bg-surface-3 p-[2px]">
       {options.map((o) => (

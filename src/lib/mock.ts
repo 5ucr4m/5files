@@ -1,7 +1,7 @@
 // In-memory backend used when running in a plain browser (vite dev) and in tests.
 // Simulates a home folder, two remote drives, the transfer queue and I/O metrics.
 import type { Backend, Unlisten } from "./api";
-import type { Connection, Entry, FsId, Job, JobRequest, MetricsSnapshot, Rates, SyncPair, Volume } from "./types";
+import type { Connection, Entry, FsId, Job, JobRequest, MetricsSnapshot, Rates, ShareView, SyncPair, Volume } from "./types";
 
 interface Node {
   name: string;
@@ -190,6 +190,35 @@ export function createMockBackend(): Backend {
       }
       pushSyncs();
     }, 250);
+  };
+  // Folder sharing: a believable link, a QR-shaped pattern and a visitor who shows up.
+  const shares: ShareView[] = [];
+  const sharesEv = emitter<ShareView[]>();
+  const pushShares = () => sharesEv.emit(shares.map((x) => ({ ...x, activity: [...x.activity] })));
+  const fakeQr = (seed: string) => {
+    const n = 33;
+    let h = 0;
+    for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const finder = (r: number, c: number) => {
+      for (const [y, x] of [[0, 0], [0, n - 7], [n - 7, 0]]) {
+        const dy = r - y, dx = c - x;
+        if (dy >= 0 && dy < 7 && dx >= 0 && dx < 7) return dy === 0 || dy === 6 || dx === 0 || dx === 6 || (dy >= 2 && dy <= 4 && dx >= 2 && dx <= 4) ? 1 : 0;
+        if (dy >= -1 && dy <= 7 && dx >= -1 && dx <= 7) return 0;
+      }
+      return -1;
+    };
+    let bits = "";
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++) {
+        const f = finder(r, c);
+        if (f >= 0) bits += f;
+        else if (r === 6 || c === 6) bits += (r + c) % 2 ? 0 : 1;
+        else {
+          h = (h * 1103515245 + 12345) >>> 0;
+          bits += (h >>> 16) & 1;
+        }
+      }
+    return { size: n, bits };
   };
   const jobs: Job[] = [];
   const paused = new Set<string>();
@@ -580,6 +609,72 @@ export function createMockBackend(): Backend {
       pushSyncs();
     },
     onSyncs: (cb) => syncEv.on(cb),
+    async shareList() {
+      return shares.map((x) => ({ ...x }));
+    },
+    async shareStart(fs, path, options) {
+      const existing = shares.find((x) => x.fs === fs && x.path === path);
+      if (existing) return { ...existing };
+      const id = ["k7m2p9xq4tav", "h3ws8cne6fzu", "b9rj4kdy2mpq"][shares.length % 3];
+      const url = `http://192.168.1.20:5155/s/${id}/`;
+      const v: ShareView = {
+        id,
+        name: path.split("/").filter(Boolean).pop() || "Home",
+        fs,
+        path,
+        url,
+        altUrls: [`http://demo-mbp.local:5155/s/${id}/`],
+        online: true,
+        qr: fakeQr(url),
+        options,
+        expiresAt: options.expiresInMins ? Date.now() + options.expiresInMins * 60_000 : null,
+        created: Date.now(),
+        visitors: 0,
+        lastSeen: null,
+        bytesOut: 0,
+        bytesIn: 0,
+        active: 0,
+        activity: [],
+      };
+      shares.push(v);
+      pushShares();
+      // Someone opens it a moment later and grabs a few files.
+      const visit = [
+        { after: 1200, a: { who: "192.168.1.34", action: "opened", name: "" }, out: 0 },
+        { after: 2600, a: { who: "192.168.1.34", action: "downloaded", name: "IMG_2041.jpg" }, out: 4_200_000 },
+        { after: 3600, a: { who: "192.168.1.51", action: "opened", name: "" }, out: 0 },
+        { after: 5200, a: { who: "192.168.1.51", action: "zip", name: v.name }, out: 48_000_000 },
+      ] as const;
+      for (const step of visit)
+        setTimeout(() => {
+          const x = shares.find((s) => s.id === id);
+          if (!x) return;
+          x.activity = [{ at: Date.now(), ...step.a }, ...x.activity];
+          x.visitors = new Set(x.activity.map((a) => a.who)).size;
+          x.lastSeen = Date.now();
+          x.bytesOut += step.out;
+          x.active = step.a.action === "zip" ? 1 : 0;
+          pushShares();
+        }, step.after);
+      return { ...v };
+    },
+    async shareUpdate(id, options) {
+      const x = shares.find((s) => s.id === id);
+      if (!x) throw { kind: "notFound", message: "share" };
+      if (x.options.expiresInMins !== options.expiresInMins) x.expiresAt = options.expiresInMins ? Date.now() + options.expiresInMins * 60_000 : null;
+      x.options = options;
+      pushShares();
+      return { ...x };
+    },
+    async shareStop(id) {
+      const i = shares.findIndex((s) => s.id === id);
+      if (i >= 0) shares.splice(i, 1);
+      pushShares();
+    },
+    onShares: (cb) => sharesEv.on(cb),
+    async openUrl(url) {
+      window.open(url, "_blank", "noopener");
+    },
     fileUrl: (path) => svgPlaceholder(path, 1200),
     thumbUrl: (path, size) => svgPlaceholder(path, size),
     onTransfers: (cb) => transfersEv.on(cb),

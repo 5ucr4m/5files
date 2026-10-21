@@ -33,6 +33,7 @@ pub struct AppState {
     pub sizes: Arc<crate::sizes::SizeCache>,
     pub temp_dir: std::path::PathBuf,
     pub uploads: Uploads,
+    pub shares: Arc<crate::share::Shares>,
 }
 
 impl AppState {
@@ -576,4 +577,43 @@ pub async fn eject_volume(state: S<'_>, mount: String) -> AppResult<()> {
 #[tauri::command]
 pub fn set_background_mode(enabled: bool) {
     crate::tray::KEEP_RUNNING.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+// ---------------------------------------------------------------- sharing
+
+#[tauri::command]
+pub fn share_list(state: S<'_>) -> Vec<crate::share::ShareView> {
+    state.shares.views()
+}
+
+#[tauri::command]
+pub async fn share_start(
+    state: S<'_>,
+    fs: String,
+    path: String,
+    options: crate::share::ShareOptions,
+) -> AppResult<crate::share::ShareView> {
+    let p = state.provider(&fs).await?;
+    if !p.stat(&path).await?.is_dir {
+        return Err(AppError::Invalid("only folders can be shared".into()));
+    }
+    let name = match p.file_name(&path) {
+        n if n.is_empty() || n == "/" => {
+            let label = root_label(&state, &fs);
+            if label.is_empty() { path.clone() } else { label }
+        }
+        n => n,
+    };
+    state.shares.start(fs, path, name, p, options).await
+}
+
+#[tauri::command]
+pub fn share_update(state: S<'_>, id: String, options: crate::share::ShareOptions) -> AppResult<crate::share::ShareView> {
+    state.shares.update(&id, options)
+}
+
+#[tauri::command]
+pub async fn share_stop(state: S<'_>, id: String) -> AppResult<()> {
+    state.shares.stop(&id).await;
+    Ok(())
 }

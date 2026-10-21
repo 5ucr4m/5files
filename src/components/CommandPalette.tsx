@@ -8,6 +8,7 @@ import { useDrives } from "../store/live";
 import { useSettings } from "../store/settings";
 import { activeTab, useTabs } from "../store/tabs";
 import { useUi } from "../store/ui";
+import { shareFolder } from "./Share";
 
 interface Command {
   id: string;
@@ -47,6 +48,8 @@ function commands(): Command[] {
     ...volumes.map((v) => ({ id: `vol-${v.mount}`, group: "Drives", title: `Open ${v.name}`, run: () => go("local", v.mount) })),
     ...connections.map((c) => ({ id: `conn-${c.id}`, group: "Drives", title: `Open ${c.name}`, run: () => openConnection(c.id) })),
     { id: "add-drive", group: "Drives", title: "Connect a remote drive…", run: () => ui.set({ panel: "connections", editing: null }) },
+    { id: "share", group: "Files", title: "Share this folder on the network…", run: () => t && void shareFolder(t.fs, t.path) },
+    { id: "shares", group: "App", title: "Show shared folders", run: () => ui.set({ panel: "share", shareView: null }) },
     { id: "view-list", group: "View", title: "View as list", hint: kbd("Mod+1"), run: () => t && tabs.patch(t.id, { view: "list" }) },
     { id: "view-grid", group: "View", title: "View as icons", hint: kbd("Mod+2"), run: () => t && tabs.patch(t.id, { view: "grid" }) },
     { id: "hidden", group: "View", title: s.showHidden ? "Hide hidden files" : "Show hidden files", hint: kbd("Mod+Shift+."), run: () => s.set({ showHidden: !s.showHidden }) },
