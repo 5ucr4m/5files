@@ -1,6 +1,6 @@
 [package]
 name = "fivefiles"
-version = "0.1.0"
+version = "0.2.0"
 description = "5files — a modern, fast, cross-platform file explorer"
 authors = ["5files contributors"]
 edition = "2024"
