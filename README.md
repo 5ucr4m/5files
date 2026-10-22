@@ -179,3 +179,7 @@ sharing; default 5155, or the next free one).
 
 Working on the share page: `FIVEFILES_SHARE_PAGE=src/share/page.html cargo run --example share_demo -- <folder> --upload`
 serves a folder and re-reads the page on every load.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The Geist fonts embedded in the share page are under the SIL Open Font License (`src-tauri/src/share/assets/GEIST-LICENSE.txt`).
