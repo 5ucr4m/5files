@@ -617,3 +617,16 @@ pub async fn share_stop(state: S<'_>, id: String) -> AppResult<()> {
     state.shares.stop(&id).await;
     Ok(())
 }
+
+// ---------------------------------------------------------------- macOS privacy
+
+/// Whether 5files has Full Disk Access (macOS); `None` elsewhere.
+#[tauri::command]
+pub fn full_disk_access() -> Option<bool> {
+    crate::privacy::full_disk_access()
+}
+
+#[tauri::command]
+pub fn open_privacy_settings() -> AppResult<()> {
+    Ok(crate::privacy::open_full_disk_access_settings()?)
+}

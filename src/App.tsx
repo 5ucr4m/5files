@@ -6,6 +6,7 @@ import { ConfirmDialog, ConflictDialog, ContextMenu, Modal, Toasts } from "./com
 import { PreviewPane, QuickLook } from "./components/Preview";
 import { SettingsPanel } from "./components/Settings";
 import { ShortcutsSheet } from "./components/Shortcuts";
+import { DiskAccessNotice, useDiskAccessWatch } from "./components/DiskAccess";
 import { SharePanel } from "./components/Share";
 import { SyncPanel } from "./components/Sync";
 import { Sidebar } from "./components/Sidebar";
@@ -279,6 +280,7 @@ function SidebarResizer() {
 export default function App() {
   useTheme();
   useBackendEvents();
+  useDiskAccessWatch();
   useShortcuts();
   const tab = useActiveTab();
   const preview = useSettings((s) => s.previewPane);
@@ -357,6 +359,7 @@ export default function App() {
           <SettingsPanel />
         </Modal>
 
+        <DiskAccessNotice />
         <PrefixHud />
         <QuickLook />
         <CommandPalette />

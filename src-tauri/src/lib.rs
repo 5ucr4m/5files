@@ -4,6 +4,7 @@ pub mod error;
 pub mod metrics;
 pub mod mouse_nav;
 pub mod oauth;
+pub mod privacy;
 pub mod search;
 pub mod share;
 pub mod sizes;
@@ -121,6 +122,8 @@ pub fn build<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::sync_pause,
             commands::eject_volume,
             commands::set_background_mode,
+            commands::full_disk_access,
+            commands::open_privacy_settings,
             commands::share_list,
             commands::share_start,
             commands::share_update,

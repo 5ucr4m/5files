@@ -461,6 +461,11 @@ export function createMockBackend(): Backend {
       return volumesList.map((v) => ({ ...v }));
     },
     async setBackgroundMode() {},
+    // The browser demo plays a Mac without Full Disk Access (?fda=1 to grant it).
+    async fullDiskAccess() {
+      return new URLSearchParams(location.search).has("fda");
+    },
+    async openPrivacySettings() {},
     onTrayOpen: () => Promise.resolve(() => {}),
     async eject(mount) {
       await delay(null, 900);

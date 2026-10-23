@@ -2,6 +2,7 @@ import { Check, Monitor, Moon, Sun, X } from "lucide-react";
 import { motion } from "motion/react";
 import { ACCENTS, resolvedTheme, useSettings, type AccentKey, type ThemePref } from "../store/settings";
 import { useUi } from "../store/ui";
+import { DiskAccessSetting, useDiskAccess } from "./DiskAccess";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -41,6 +42,7 @@ export function Segmented<T extends string>({ value, options, onChange, id }: { 
 
 export function SettingsPanel() {
   const s = useSettings();
+  const fullDisk = useDiskAccess((d) => d.granted);
   const dark = resolvedTheme(s.theme) === "dark";
   return (
     <div className="flex max-h-[min(640px,85vh)] flex-col">
@@ -110,6 +112,11 @@ export function SettingsPanel() {
         <Row label="Keep running when the window is closed" hint="5files stays in the menu bar / system tray, so syncs and transfers continue. Quit from the tray icon.">
           <Toggle label="Keep running when the window is closed" on={s.keepRunning} onChange={(keepRunning) => s.set({ keepRunning })} />
         </Row>
+        {fullDisk !== null && (
+          <Row label="Full Disk Access" hint="Lets 5files open every folder and drive without macOS asking for each one.">
+            <DiskAccessSetting />
+          </Row>
+        )}
         <Row label="Show hidden files">
           <Toggle label="Show hidden files" on={s.showHidden} onChange={(showHidden) => s.set({ showHidden })} />
         </Row>

@@ -35,6 +35,8 @@ interface SettingsState {
   folderSizes: boolean;
   /** Closing the window keeps 5files in the tray / menu bar (syncs keep running). */
   keepRunning: boolean;
+  /** "Not now" on the macOS Full Disk Access notice. */
+  diskAccessNoticeDismissed: boolean;
   favorites: Favorite[];
   set: (patch: Partial<Omit<SettingsState, "set" | "toggleFavorite">>) => void;
   toggleFavorite: (f: Favorite) => void;
@@ -64,6 +66,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   reduceMotion: false,
   folderSizes: true,
   keepRunning: true,
+  diskAccessNoticeDismissed: false,
   favorites: [],
   ...load(),
   set: (patch) => set(patch),

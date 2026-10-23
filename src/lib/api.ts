@@ -50,6 +50,10 @@ export interface Backend {
   onTrayOpen(cb: (what: string) => void): Promise<Unlisten>;
   /** Mouse back/forward buttons caught natively (macOS, where the webview doesn't see them). */
   onMouseNav(cb: (dir: "back" | "forward") => void): Promise<Unlisten>;
+  /** macOS: whether 5files has Full Disk Access; null on other systems. */
+  fullDiskAccess(): Promise<boolean | null>;
+  /** Opens System Settings at Privacy & Security → Full Disk Access. */
+  openPrivacySettings(): Promise<void>;
   /** Ejects a removable volume by its mount point. */
   eject(mount: string): Promise<void>;
   places(): Promise<Place[]>;
@@ -134,6 +138,8 @@ async function tauriBackend(): Promise<Backend> {
     volumes: () => invoke("get_volumes"),
     eject: (mount) => invoke("eject_volume", { mount }),
     setBackgroundMode: (enabled) => invoke("set_background_mode", { enabled }),
+    fullDiskAccess: () => invoke("full_disk_access"),
+    openPrivacySettings: () => invoke("open_privacy_settings"),
     onTrayOpen: (cb) => listen<string>("tray-open", (e) => cb(e.payload)),
     places: () => invoke("get_places"),
     platform: () => invoke("platform"),
