@@ -12,5 +12,7 @@
   <string>5files shows and manages the files on external drives.</string>
   <key>NSNetworkVolumesUsageDescription</key>
   <string>5files shows and manages the files on network drives.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>5files connects to servers on your local network and shares folders with devices on it.</string>
 </dict>
 </plist>
